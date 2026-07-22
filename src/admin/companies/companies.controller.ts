@@ -77,6 +77,21 @@ export class CompaniesController {
     );
   }
 
+  @Get('monthly-activity')
+  @ApiOperation({
+    summary: 'Reporte de actividad mensual por empresa',
+    description: 'Devuelve, por empresa, el número de documentos emitidos por mes en el año indicado, más el total y el promedio mensual. Opcionalmente filtrable por ambiente.',
+  })
+  @ApiQuery({ name: 'year', required: false, type: Number, description: 'Año a consultar (default: año actual)' })
+  @ApiQuery({ name: 'env', required: false, enum: ['production', 'test', 'all'], description: 'Filtrar por ambiente (default: all)' })
+  getMonthlyActivity(
+    @Query('year') year?: string,
+    @Query('env') env?: 'production' | 'test' | 'all',
+  ) {
+    const y = year ? Number(year) : new Date().getFullYear();
+    return this.companiesService.getMonthlyActivity(y, env ?? 'all');
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener empresa por ID' })
   findOne(@Param('id', ParseIntPipe) id: number) {

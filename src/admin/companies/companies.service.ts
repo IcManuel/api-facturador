@@ -76,6 +76,96 @@ export class CompaniesService {
     };
   }
 
+  /**
+   * Monthly activity report: for each company, count docs per month of the
+   * given year (total + authorized), plus the yearly total and monthly average.
+   * Sorted by total docs desc.
+   */
+  async getMonthlyActivity(year: number, env: 'production' | 'test' | 'all') {
+    const envFilter =
+      env === 'production' ? ` AND d.doc_env = 'production'`
+      : env === 'test' ? ` AND d.doc_env = 'test'`
+      : '';
+
+    const rows = await this.companyRepo.manager.query<Array<{
+      com_id: number;
+      com_name: string;
+      com_ruc: string;
+      acc_id: number;
+      acc_name: string;
+      m01: string; m02: string; m03: string; m04: string; m05: string; m06: string;
+      m07: string; m08: string; m09: string; m10: string; m11: string; m12: string;
+      a01: string; a02: string; a03: string; a04: string; a05: string; a06: string;
+      a07: string; a08: string; a09: string; a10: string; a11: string; a12: string;
+      total: string;
+      total_authorized: string;
+    }>>(
+      `
+      SELECT
+        c.com_id, c.com_name, c.com_ruc, a.acc_id, a.acc_name,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=1)  AS m01,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=2)  AS m02,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=3)  AS m03,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=4)  AS m04,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=5)  AS m05,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=6)  AS m06,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=7)  AS m07,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=8)  AS m08,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=9)  AS m09,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=10) AS m10,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=11) AS m11,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=12) AS m12,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=1  AND d.doc_status='AUTHORIZED') AS a01,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=2  AND d.doc_status='AUTHORIZED') AS a02,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=3  AND d.doc_status='AUTHORIZED') AS a03,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=4  AND d.doc_status='AUTHORIZED') AS a04,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=5  AND d.doc_status='AUTHORIZED') AS a05,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=6  AND d.doc_status='AUTHORIZED') AS a06,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=7  AND d.doc_status='AUTHORIZED') AS a07,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=8  AND d.doc_status='AUTHORIZED') AS a08,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=9  AND d.doc_status='AUTHORIZED') AS a09,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=10 AND d.doc_status='AUTHORIZED') AS a10,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=11 AND d.doc_status='AUTHORIZED') AS a11,
+        COUNT(d.doc_id) FILTER (WHERE EXTRACT(MONTH FROM d.doc_created_at)=12 AND d.doc_status='AUTHORIZED') AS a12,
+        COUNT(d.doc_id) AS total,
+        COUNT(d.doc_id) FILTER (WHERE d.doc_status='AUTHORIZED') AS total_authorized
+      FROM app.company c
+      JOIN app.account a ON a.acc_id = c.acc_id
+      LEFT JOIN app.document d
+             ON d.com_id = c.com_id
+            AND EXTRACT(YEAR FROM d.doc_created_at) = $1
+            ${envFilter}
+      GROUP BY c.com_id, c.com_name, c.com_ruc, a.acc_id, a.acc_name
+      ORDER BY total DESC, c.com_name ASC;
+      `,
+      [year],
+    );
+
+    return {
+      year,
+      env,
+      companies: rows.map((r) => {
+        const monthly = [r.m01, r.m02, r.m03, r.m04, r.m05, r.m06, r.m07, r.m08, r.m09, r.m10, r.m11, r.m12].map(Number);
+        const monthlyAuthorized = [r.a01, r.a02, r.a03, r.a04, r.a05, r.a06, r.a07, r.a08, r.a09, r.a10, r.a11, r.a12].map(Number);
+        const total = Number(r.total);
+        const totalAuthorized = Number(r.total_authorized);
+        const activeMonths = monthly.filter((n) => n > 0).length;
+        return {
+          companyId: Number(r.com_id),
+          companyName: r.com_name,
+          ruc: r.com_ruc,
+          accountId: Number(r.acc_id),
+          accountName: r.acc_name,
+          monthly,
+          monthlyAuthorized,
+          total,
+          totalAuthorized,
+          monthlyAverage: activeMonths > 0 ? Number((total / activeMonths).toFixed(1)) : 0,
+        };
+      }),
+    };
+  }
+
   async findOne(id: number): Promise<Company> {
     const company = await this.companyRepo.findOne({
       where: { id },
