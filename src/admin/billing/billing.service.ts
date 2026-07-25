@@ -161,9 +161,11 @@ export class BillingService {
     const accounts: { accId: number }[] = await this.dataSource.query(
       `SELECT DISTINCT c.acc_id AS "accId"
        FROM app.company c
+       JOIN app.account  a ON a.acc_id = c.acc_id
        WHERE c.com_is_active = true
          AND c.com_billing_start_date IS NOT NULL
-         AND c.com_billing_start_date <= $1`,
+         AND c.com_billing_start_date <= $1
+         AND a.acc_is_internal = false`,
       [targetEnd.toISOString().slice(0, 10)],
     );
 
@@ -469,6 +471,7 @@ export class BillingService {
       .createQueryBuilder('a')
       .where('a.status = :status', { status: AccountStatus.ACTIVE })
       .andWhere('a.isActive = true')
+      .andWhere('a.isInternal = false')
       .andWhere('a.billingCycleDay IN (:...days)', { days: cycleDayCandidates })
       .getMany();
 

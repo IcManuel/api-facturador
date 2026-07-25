@@ -31,4 +31,11 @@ export class UpdateAccountDto extends PartialType(
   @IsOptional()
   @IsString()
   rideFooter?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Marcar cuenta como interna/propia — se excluye del billing y de todas las notificaciones automáticas.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isInternal?: boolean;
 }

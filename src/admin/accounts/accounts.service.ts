@@ -229,6 +229,7 @@ export class AccountsService {
     lastPeriodTotal: number | null;
     lastPeriodStatus: string | null;
     lastPeriodPaidAt: Date | null;
+    isInternal: boolean;
   }>> {
     const rows = await this.repo.manager.query<Array<{
       acc_id: number;
@@ -238,6 +239,7 @@ export class AccountsService {
       acc_type: string;
       acc_status: string;
       acc_is_active: boolean;
+      acc_is_internal: boolean;
       acc_trial_ends_at: Date | null;
       acc_created_at: Date;
       acc_billing_cycle_day: number;
@@ -264,6 +266,7 @@ export class AccountsService {
           a.acc_type,
           a.acc_status,
           a.acc_is_active,
+          a.acc_is_internal,
           a.acc_trial_ends_at,
           a.acc_created_at,
           a.acc_billing_cycle_day,
@@ -330,6 +333,7 @@ export class AccountsService {
         lastPeriodTotal: r.last_period_total ? Number(r.last_period_total) : null,
         lastPeriodStatus: r.last_period_status ?? null,
         lastPeriodPaidAt: r.last_period_paid_at,
+        isInternal: !!r.acc_is_internal,
       };
     });
   }

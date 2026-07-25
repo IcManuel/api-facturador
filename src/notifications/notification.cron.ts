@@ -43,7 +43,7 @@ export class NotificationCron {
           isCurrent: true,
           expiresAt: LessThanOrEqual(warningDate),
         },
-        relations: ['company'],
+        relations: ['company', 'company.account'],
       });
 
       if (certs.length === 0) return;
@@ -56,6 +56,7 @@ export class NotificationCron {
       for (const cert of certs) {
         const company = cert.company;
         if (!company || !company.isActive) continue;
+        if (company.account?.isInternal) continue; // skip cuentas propias
 
         const expiresAt = new Date(cert.expiresAt);
         expiresAt.setHours(0, 0, 0, 0);
@@ -119,6 +120,7 @@ export class NotificationCron {
       for (const bp of pastDue) {
         const account = bp.account;
         if (!account || !account.isActive) continue;
+        if (account.isInternal) continue; // skip cuentas propias
 
         // Calculate days since the period ended
         const periodEnd = new Date(bp.year, bp.month, 1); // first day of next month
@@ -159,6 +161,7 @@ export class NotificationCron {
         where: {
           status: AccountStatus.TRIAL,
           trialEndsAt: LessThanOrEqual(new Date()),
+          isInternal: false,
         },
       });
 
