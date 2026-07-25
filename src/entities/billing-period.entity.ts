@@ -30,6 +30,12 @@ export class BillingPeriod {
   @Column({ name: 'bpe_month', type: 'smallint' })
   month: number;
 
+  @Column({ name: 'bpe_period_start_date', type: 'date', nullable: true })
+  periodStartDate: string | null;
+
+  @Column({ name: 'bpe_period_end_date', type: 'date', nullable: true })
+  periodEndDate: string | null;
+
   @Column({ name: 'bpe_docs_total', type: 'int', default: 0 })
   docsTotal: number;
 

@@ -194,6 +194,10 @@ export class AccountsService {
     if (!account) throw new NotFoundException('Cuenta no encontrada');
     account.status = AccountStatus.ACTIVE;
     account.trialEndsAt = null;
+    // Anchor the anniversary billing cycle at today's day of month, so the
+    // next payment lands exactly one month from the activation date.
+    // Cap to 28 to avoid gaps in short months (Feb).
+    account.billingCycleDay = Math.min(new Date().getDate(), 28);
     return this.repo.save(account);
   }
 
@@ -218,6 +222,13 @@ export class AccountsService {
     documentsFailed: number;
     lastDocumentAt: Date | null;
     lastActivityAt: Date | null;
+    billingCycleDay: number;
+    nextBillingDate: string | null;
+    lastPeriodYear: number | null;
+    lastPeriodMonth: number | null;
+    lastPeriodTotal: number | null;
+    lastPeriodStatus: string | null;
+    lastPeriodPaidAt: Date | null;
   }>> {
     const rows = await this.repo.manager.query<Array<{
       acc_id: number;
@@ -229,6 +240,7 @@ export class AccountsService {
       acc_is_active: boolean;
       acc_trial_ends_at: Date | null;
       acc_created_at: Date;
+      acc_billing_cycle_day: number;
       companies_count: string;
       documents_total: string;
       documents_authorized: string;
@@ -236,6 +248,11 @@ export class AccountsService {
       documents_failed: string;
       last_document_at: Date | null;
       last_activity_at: Date | null;
+      last_period_year: number | null;
+      last_period_month: number | null;
+      last_period_total: string | null;
+      last_period_status: string | null;
+      last_period_paid_at: Date | null;
     }>>(
       `
       WITH per_account AS (
@@ -249,6 +266,7 @@ export class AccountsService {
           a.acc_is_active,
           a.acc_trial_ends_at,
           a.acc_created_at,
+          a.acc_billing_cycle_day,
           COUNT(DISTINCT c.com_id) AS companies_count,
           COUNT(d.doc_id)                                    AS documents_total,
           COUNT(d.doc_id) FILTER (WHERE d.doc_status='AUTHORIZED') AS documents_authorized,
@@ -259,33 +277,61 @@ export class AccountsService {
         LEFT JOIN app.company c   ON c.acc_id = a.acc_id
         LEFT JOIN app.document d  ON d.com_id = c.com_id
         GROUP BY a.acc_id
+      ),
+      last_period AS (
+        SELECT DISTINCT ON (bp.acc_id)
+          bp.acc_id,
+          bp.bpe_year          AS last_period_year,
+          bp.bpe_month         AS last_period_month,
+          bp.bpe_total         AS last_period_total,
+          bp.bpe_status::text  AS last_period_status,
+          bp.bpe_paid_at       AS last_period_paid_at
+        FROM app.billing_period bp
+        ORDER BY bp.acc_id, bp.bpe_year DESC, bp.bpe_month DESC, bp.bpe_id DESC
       )
       SELECT
         p.*,
-        GREATEST(p.last_document_at, p.acc_created_at) AS last_activity_at
+        GREATEST(p.last_document_at, p.acc_created_at) AS last_activity_at,
+        lp.last_period_year, lp.last_period_month, lp.last_period_total,
+        lp.last_period_status, lp.last_period_paid_at
       FROM per_account p
+      LEFT JOIN last_period lp ON lp.acc_id = p.acc_id
       ORDER BY GREATEST(p.last_document_at, p.acc_created_at) DESC NULLS LAST;
       `,
     );
 
-    return rows.map((r) => ({
-      accountId: Number(r.acc_id),
-      name: r.acc_name,
-      ruc: r.acc_ruc,
-      email: r.acc_email,
-      type: r.acc_type,
-      status: r.acc_status,
-      isActive: r.acc_is_active,
-      trialEndsAt: r.acc_trial_ends_at,
-      createdAt: r.acc_created_at,
-      companiesCount: Number(r.companies_count),
-      documentsTotal: Number(r.documents_total),
-      documentsAuthorized: Number(r.documents_authorized),
-      documentsRejected: Number(r.documents_rejected),
-      documentsFailed: Number(r.documents_failed),
-      lastDocumentAt: r.last_document_at,
-      lastActivityAt: r.last_activity_at,
-    }));
+    return rows.map((r) => {
+      const cycleDay = Number(r.acc_billing_cycle_day) || 1;
+      const isActive = r.acc_status === 'active';
+      const nextBillingDate = isActive
+        ? (require('../billing/billing.service').BillingService.nextBillingDate as (d: Date, cd: number) => Date)(new Date(), cycleDay).toISOString().slice(0, 10)
+        : null;
+      return {
+        accountId: Number(r.acc_id),
+        name: r.acc_name,
+        ruc: r.acc_ruc,
+        email: r.acc_email,
+        type: r.acc_type,
+        status: r.acc_status,
+        isActive: r.acc_is_active,
+        trialEndsAt: r.acc_trial_ends_at,
+        createdAt: r.acc_created_at,
+        companiesCount: Number(r.companies_count),
+        documentsTotal: Number(r.documents_total),
+        documentsAuthorized: Number(r.documents_authorized),
+        documentsRejected: Number(r.documents_rejected),
+        documentsFailed: Number(r.documents_failed),
+        lastDocumentAt: r.last_document_at,
+        lastActivityAt: r.last_activity_at,
+        billingCycleDay: cycleDay,
+        nextBillingDate,
+        lastPeriodYear: r.last_period_year ? Number(r.last_period_year) : null,
+        lastPeriodMonth: r.last_period_month ? Number(r.last_period_month) : null,
+        lastPeriodTotal: r.last_period_total ? Number(r.last_period_total) : null,
+        lastPeriodStatus: r.last_period_status ?? null,
+        lastPeriodPaidAt: r.last_period_paid_at,
+      };
+    });
   }
 
   /**
