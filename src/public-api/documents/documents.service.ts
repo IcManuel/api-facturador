@@ -456,22 +456,27 @@ export class PublicDocumentsService {
       }
     }
 
-    // Duplicate detection via content hash
+    // Duplicate detection via content hash. Solo aplica cuando el cliente NO
+    // envía idempotencyKey — es un fallback para prevenir doble-POST accidental.
+    // Si el cliente envía idempotencyKey, ya pasó el chequeo por key arriba y
+    // asumimos que sabe lo que hace (facturas legítimas idénticas están permitidas).
     const contentHash = this.computeContentHash(dto);
-    const duplicate = await this.docRepo.findOne({
-      where: { companyId: company.id, contentHash },
-    });
-    if (duplicate) {
-      throw new ConflictException({
-        message: 'Documento duplicado detectado. Ya existe un documento con el mismo contenido.',
-        documentoExistente: {
-          id: duplicate.id,
-          secuencial: duplicate.sequential,
-          claveAcceso: duplicate.accessKey,
-          estado: duplicate.status,
-        },
-        sugerencia: 'Si desea reprocesar, use PUT /documents/{claveAcceso} para corregir. Si es un documento diferente, verifique los datos o use un idempotencyKey distinto.',
+    if (!dto.idempotencyKey) {
+      const duplicate = await this.docRepo.findOne({
+        where: { companyId: company.id, contentHash },
       });
+      if (duplicate) {
+        throw new ConflictException({
+          message: 'Documento duplicado detectado. Ya existe un documento con el mismo contenido.',
+          documentoExistente: {
+            id: duplicate.id,
+            secuencial: duplicate.sequential,
+            claveAcceso: duplicate.accessKey,
+            estado: duplicate.status,
+          },
+          sugerencia: 'Si se trata de dos comprobantes distintos legítimamente idénticos, envíe cada uno con un idempotencyKey único para saltar esta protección. Si desea reprocesar el existente, use PUT /documents/{claveAcceso}.',
+        });
+      }
     }
 
     // Sequential: company decides if they provide it or we generate it

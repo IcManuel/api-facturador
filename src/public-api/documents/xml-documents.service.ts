@@ -219,22 +219,27 @@ export class XmlDocumentsService {
       }
     }
 
-    // Duplicate detection via content hash of the XML
+    // Duplicate detection via content hash of the XML. Solo aplica cuando el
+    // cliente NO envía idempotencyKey — es fallback contra doble-POST accidental.
+    // Con idempotencyKey explícito confiamos en el cliente (dos XMLs idénticos
+    // legítimos están permitidos siempre y cuando usen keys distintas).
     const contentHash = this.computeContentHash(dto.xml);
-    const duplicate = await this.docRepo.findOne({
-      where: { companyId: company.id, contentHash },
-    });
-    if (duplicate) {
-      throw new ConflictException({
-        message: 'Documento duplicado detectado. Ya existe un documento con el mismo XML.',
-        documentoExistente: {
-          id: duplicate.id,
-          secuencial: duplicate.sequential,
-          claveAcceso: duplicate.accessKey,
-          estado: duplicate.status,
-        },
-        sugerencia: 'Si desea reprocesar, use PUT /documents/xml/{claveAcceso} para corregir.',
+    if (!dto.idempotencyKey) {
+      const duplicate = await this.docRepo.findOne({
+        where: { companyId: company.id, contentHash },
       });
+      if (duplicate) {
+        throw new ConflictException({
+          message: 'Documento duplicado detectado. Ya existe un documento con el mismo XML.',
+          documentoExistente: {
+            id: duplicate.id,
+            secuencial: duplicate.sequential,
+            claveAcceso: duplicate.accessKey,
+            estado: duplicate.status,
+          },
+          sugerencia: 'Si son dos comprobantes legítimos con el mismo contenido, envíe cada uno con un idempotencyKey único. Si desea reprocesar el existente, use PUT /documents/xml/{claveAcceso}.',
+        });
+      }
     }
 
     const issueDate = this.parseDate(meta.fechaEmision);
