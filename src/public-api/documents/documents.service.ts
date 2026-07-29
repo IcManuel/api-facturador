@@ -459,9 +459,11 @@ export class PublicDocumentsService {
     // Duplicate detection via content hash. Solo aplica cuando el cliente NO
     // envía idempotencyKey — es un fallback para prevenir doble-POST accidental.
     // Si el cliente envía idempotencyKey, ya pasó el chequeo por key arriba y
-    // asumimos que sabe lo que hace (facturas legítimas idénticas están permitidas).
-    const contentHash = this.computeContentHash(dto);
-    if (!dto.idempotencyKey) {
+    // no computamos ni persistimos contentHash (guardamos NULL) para que el
+    // índice único parcial uq_document_content_hash no lo bloquee — el contrato
+    // de unicidad pasa a ser la key explícita del cliente.
+    const contentHash = dto.idempotencyKey ? null : this.computeContentHash(dto);
+    if (contentHash) {
       const duplicate = await this.docRepo.findOne({
         where: { companyId: company.id, contentHash },
       });
@@ -579,7 +581,7 @@ export class PublicDocumentsService {
     doc.buyerId = dto.identificacionComprador;
     doc.establishment = company.establishment;
     doc.emissionPoint = emissionPoint;
-    doc.contentHash = contentHash;
+    doc.contentHash = contentHash as any;
     doc.idempotencyKey = dto.idempotencyKey as any;
     doc.payload = dto as any;
 
@@ -694,7 +696,7 @@ export class PublicDocumentsService {
     doc.buyerName = dto.razonSocialComprador;
     doc.buyerIdType = dto.tipoIdentificacionComprador;
     doc.buyerId = dto.identificacionComprador;
-    doc.contentHash = this.computeContentHash(dto);
+    doc.contentHash = doc.idempotencyKey ? (null as any) : this.computeContentHash(dto);
     doc.authNumber = null as any;
     doc.authAt = null as any;
     doc.processingTimeMs = null as any;

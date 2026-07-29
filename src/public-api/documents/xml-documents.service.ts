@@ -221,10 +221,11 @@ export class XmlDocumentsService {
 
     // Duplicate detection via content hash of the XML. Solo aplica cuando el
     // cliente NO envía idempotencyKey — es fallback contra doble-POST accidental.
-    // Con idempotencyKey explícito confiamos en el cliente (dos XMLs idénticos
+    // Con idempotencyKey explícito guardamos contentHash NULL para no colisionar
+    // con el índice único parcial uq_document_content_hash (dos XMLs idénticos
     // legítimos están permitidos siempre y cuando usen keys distintas).
-    const contentHash = this.computeContentHash(dto.xml);
-    if (!dto.idempotencyKey) {
+    const contentHash = dto.idempotencyKey ? null : this.computeContentHash(dto.xml);
+    if (contentHash) {
       const duplicate = await this.docRepo.findOne({
         where: { companyId: company.id, contentHash },
       });
@@ -261,7 +262,7 @@ export class XmlDocumentsService {
     doc.buyerId = meta.buyerId;
     doc.establishment = meta.establecimiento;
     doc.emissionPoint = meta.puntoEmision;
-    doc.contentHash = contentHash;
+    doc.contentHash = contentHash as any;
     doc.idempotencyKey = dto.idempotencyKey as any;
     // Store raw XML and email in payload for processing
     doc.payload = { _rawXml: dto.xml, emailComprador: dto.emailComprador } as any;
@@ -407,7 +408,7 @@ export class XmlDocumentsService {
     doc.buyerName = meta.buyerName;
     doc.buyerIdType = meta.buyerIdType;
     doc.buyerId = meta.buyerId;
-    doc.contentHash = this.computeContentHash(dto.xml);
+    doc.contentHash = doc.idempotencyKey ? (null as any) : this.computeContentHash(dto.xml);
     doc.authNumber = null as any;
     doc.authAt = null as any;
     doc.processingTimeMs = null as any;
