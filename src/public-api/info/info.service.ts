@@ -270,6 +270,7 @@ export class InfoService {
     const plan = company.plan;
     const docLimit = plan?.docLimit ?? null;
     const overageEnabled = company.overageEnabled;
+    const testLimit = company.testDocLimit ?? InfoService.TEST_DOC_LIMIT;
 
     return {
       period: {
@@ -285,8 +286,8 @@ export class InfoService {
       },
       test: {
         docsTotal: testTotal,
-        limit: InfoService.TEST_DOC_LIMIT,
-        remaining: Math.max(0, InfoService.TEST_DOC_LIMIT - testTotal),
+        limit: testLimit,
+        remaining: Math.max(0, testLimit - testTotal),
       },
       plan: plan ? {
         name: plan.name,
