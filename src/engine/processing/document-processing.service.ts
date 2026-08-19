@@ -20,6 +20,7 @@ import { MailService } from '../../common/services/mail.service';
 import { classifySriMessages, SriErrorAction } from '../sri/sri-errors';
 import { EventsGateway } from '../../events/events.gateway';
 import { NotificationService } from '../../notifications/notification.service';
+import { withRucProveedor, injectRucProveedorIntoRawXml } from '../xml/ruc-proveedor.util';
 
 export interface ProcessingResult {
   status: 'authorized' | 'rejected' | 'failed' | 'processing';
@@ -136,7 +137,7 @@ export class DocumentProcessingService {
         const xmlStartTime = Date.now();
         await this.addTimeline(documentId, 'xml_generated', TimelineStepStatus.CURRENT,
           stepOrder++, 'Validando XML recibido');
-        xml = rawXml;
+        xml = injectRucProveedorIntoRawXml(rawXml);
         await this.updateLastTimeline(documentId, TimelineStepStatus.COMPLETED,
           'XML recibido directamente', Date.now() - xmlStartTime);
       } else {
@@ -916,7 +917,7 @@ export class DocumentProcessingService {
       dirEstablecimiento: payload.dirEstablecimiento || company.address || undefined,
       contribuyenteEspecial: payload.contribuyenteEspecial || undefined,
       obligadoContabilidad: payload.obligadoContabilidad || 'NO',
-      infoAdicional: payload.infoAdicional || undefined,
+      infoAdicional: withRucProveedor(payload.infoAdicional),
     };
 
     if (doc.typeCode === '07') {
@@ -1325,7 +1326,7 @@ export class DocumentProcessingService {
       totalConImpuestos: [],
       pagos: [],
 
-      infoAdicional: payload.infoAdicional || undefined,
+      infoAdicional: withRucProveedor(payload.infoAdicional),
     };
 
     if (doc.typeCode === '07') {
