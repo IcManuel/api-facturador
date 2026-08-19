@@ -93,6 +93,9 @@ export class Company {
   @Column({ name: 'com_is_active', default: true })
   isActive: boolean;
 
+  @Column({ name: 'com_test_doc_limit', type: 'smallint', nullable: true })
+  testDocLimit: number | null;
+
   @CreateDateColumn({ name: 'com_created_at', type: 'timestamptz' })
   createdAt: Date;
 

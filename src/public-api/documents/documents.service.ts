@@ -807,7 +807,8 @@ export class PublicDocumentsService {
     const isTestEnv = company.env === 'test';
 
     if (isTestEnv) {
-      // Test environment: 50 free docs/month for all plans
+      // Test environment: 50 free docs/month for all plans, unless the company has an override
+      const testLimit = company.testDocLimit ?? PublicDocumentsService.TEST_DOC_LIMIT;
       const testCount = await this.docRepo
         .createQueryBuilder('d')
         .where('d.companyId = :companyId', { companyId: company.id })
@@ -816,10 +817,10 @@ export class PublicDocumentsService {
         .andWhere('d.env = :env', { env: 'test' })
         .getCount();
 
-      if (testCount >= PublicDocumentsService.TEST_DOC_LIMIT) {
+      if (testCount >= testLimit) {
         throw new ForbiddenException(
-          `Límite de documentos de prueba alcanzado (${PublicDocumentsService.TEST_DOC_LIMIT}/mes). ` +
-          `Los documentos en ambiente de pruebas tienen un límite de ${PublicDocumentsService.TEST_DOC_LIMIT} por mes.`,
+          `Límite de documentos de prueba alcanzado (${testLimit}/mes). ` +
+          `Los documentos en ambiente de pruebas tienen un límite de ${testLimit} por mes.`,
         );
       }
       return; // Test docs don't consume plan limit
