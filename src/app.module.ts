@@ -27,6 +27,7 @@ import { EngineModule } from './engine/engine.module';
 import { QueuesModule } from './queues/queues.module';
 import { EventsModule } from './events/events.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { StatusModule } from './status/status.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     QueuesModule,
     EventsModule,
     NotificationsModule,
+    StatusModule,
   ],
 })
 export class AppModule {}
