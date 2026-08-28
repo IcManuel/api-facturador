@@ -180,9 +180,11 @@ export class CompaniesService {
   }
 
   async create(dto: CreateCompanyDto): Promise<Company> {
-    const exists = await this.companyRepo.findOne({ where: { ruc: dto.ruc } });
+    // El RUC es único por cuenta, no globalmente: la misma empresa puede
+    // estar registrada bajo cuentas distintas.
+    const exists = await this.companyRepo.findOne({ where: { ruc: dto.ruc, accountId: dto.accountId } });
     if (exists) {
-      throw new ConflictException(`Ya existe una empresa con RUC ${dto.ruc}`);
+      throw new ConflictException(`Ya existe una empresa con RUC ${dto.ruc} en esa cuenta`);
     }
 
     const apiKey = 'sk_' + randomBytes(32).toString('hex');

@@ -108,9 +108,11 @@ export class ClientCompaniesService {
       throw new BadRequestException('El plan seleccionado no está disponible');
     }
 
-    const exists = await this.companyRepo.findOne({ where: { ruc: dto.ruc } });
+    // El RUC es único por cuenta, no globalmente: la misma empresa puede
+    // estar registrada bajo cuentas distintas (ej. ambientes de prueba separados).
+    const exists = await this.companyRepo.findOne({ where: { ruc: dto.ruc, accountId } });
     if (exists) {
-      throw new ConflictException(`Ya existe una empresa con RUC ${dto.ruc}`);
+      throw new ConflictException(`Ya existe una empresa con RUC ${dto.ruc} en esta cuenta`);
     }
 
     const apiKey = 'sk_' + randomBytes(32).toString('hex');
@@ -163,12 +165,12 @@ export class ClientCompaniesService {
       );
     }
 
-    // RUC must be unique across companies.
+    // RUC único por cuenta, no globalmente.
     const ownedByOtherCompany = await this.companyRepo.findOne({
-      where: { ruc: newRuc, id: Not(company.id) },
+      where: { ruc: newRuc, accountId, id: Not(company.id) },
     });
     if (ownedByOtherCompany) {
-      throw new ConflictException(`Ya existe una empresa registrada con el RUC ${newRuc}.`);
+      throw new ConflictException(`Ya existe una empresa registrada con el RUC ${newRuc} en esta cuenta.`);
     }
 
     company.ruc = newRuc;

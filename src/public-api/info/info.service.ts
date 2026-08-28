@@ -76,12 +76,15 @@ export class InfoService {
       );
     }
 
+    // El RUC es único por cuenta, no globalmente.
     const clashCompany = await this.companyRepo
       .createQueryBuilder('c')
-      .where('c.ruc = :ruc AND c.id <> :id', { ruc: newRuc, id: company.id })
+      .where('c.ruc = :ruc AND c.accountId = :accountId AND c.id <> :id', {
+        ruc: newRuc, accountId: company.accountId, id: company.id,
+      })
       .getOne();
     if (clashCompany) {
-      throw new ConflictException(`Ya existe una empresa registrada con el RUC ${newRuc}.`);
+      throw new ConflictException(`Ya existe una empresa registrada con el RUC ${newRuc} en esta cuenta.`);
     }
 
     await this.companyRepo.update(company.id, { ruc: newRuc });

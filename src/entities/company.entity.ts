@@ -7,6 +7,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { CompanyEnv, CompanyStatus, AccessKeyMode, SequentialMode } from './enums';
 import { Account } from './account.entity';
@@ -17,6 +18,7 @@ import { Certificate } from './certificate.entity';
 import { Document } from './document.entity';
 
 @Entity({ schema: 'app', name: 'company' })
+@Index('uq_company_account_ruc', ['accountId', 'ruc'], { unique: true })
 export class Company {
   @PrimaryGeneratedColumn({ name: 'com_id' })
   id: number;
@@ -33,7 +35,7 @@ export class Company {
   @Column({ name: 'com_trade_name', length: 300, nullable: true })
   tradeName: string;
 
-  @Column({ name: 'com_ruc', length: 13, unique: true })
+  @Column({ name: 'com_ruc', length: 13 })
   ruc: string;
 
   @Column({ name: 'com_address', type: 'text', nullable: true })
