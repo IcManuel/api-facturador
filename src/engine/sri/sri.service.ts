@@ -386,18 +386,7 @@ export class SriService {
     const authDateMatch = xml.match(/<fechaAutorizacion>([^<]+)<\/fechaAutorizacion>/);
     const authorizedAt = authDateMatch?.[1] ?? null;
 
-    // Tolerante a espacios/saltos de línea entre <comprobante> y el CDATA —
-    // el SRI no siempre los devuelve pegados (bug detectado en incidente 2026-08-31).
-    const compMatch = xml.match(/<comprobante>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/comprobante>/);
-    const authorizedXml = compMatch?.[1] ?? null;
-
-    if (state === SRI_STATE_AUTHORIZED && !authorizedXml) {
-      this.logger.warn(
-        `DEBUG: authorizedXml extraction failed for AUTORIZADO response. ` +
-        `len=${xml.length}, hasComprobante=${xml.includes('comprobante')}, hasCDATA=${xml.includes('CDATA')}. ` +
-        `Snippet around 'comprobante': ${xml.slice(Math.max(0, xml.indexOf('comprobante') - 50), xml.indexOf('comprobante') + 200)}`,
-      );
-    }
+    const authorizedXml = this.extractComprobante(xml);
 
     const messages = this.extractMessages(xml);
 
@@ -437,6 +426,33 @@ export class SriService {
   private extractTag(xml: string, tag: string): string {
     const match = xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`));
     return match?.[1] ?? '';
+  }
+
+  /**
+   * Extract the authorized comprobante XML from the SRI response. The SRI is
+   * inconsistent about how it embeds it: sometimes wrapped in CDATA, sometimes
+   * as plain HTML-entity-escaped text with no CDATA at all (both observed in
+   * production — incidente 2026-08-31, doc 10761).
+   */
+  private extractComprobante(xml: string): string | null {
+    const cdataMatch = xml.match(/<comprobante>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/comprobante>/);
+    if (cdataMatch) return cdataMatch[1];
+
+    const plainMatch = xml.match(/<comprobante>([\s\S]*?)<\/comprobante>/);
+    if (plainMatch && plainMatch[1].includes('&lt;')) {
+      return this.decodeXmlEntities(plainMatch[1]);
+    }
+
+    return null;
+  }
+
+  private decodeXmlEntities(text: string): string {
+    return text
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&');
   }
 
   private sleep(ms: number): Promise<void> {
