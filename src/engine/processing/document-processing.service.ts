@@ -742,19 +742,27 @@ export class DocumentProcessingService {
 
     // Authorized XML is CRITICAL — retry up to 3 times
     const authorizedXml = authResult.authorizedXml || signedXml;
-    xmlBuffer = Buffer.from(authorizedXml, 'utf-8');
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const authUpload = await this.s3Service.uploadXml(
-          doc.company.ruc, doc.accessKey, 'authorized', authorizedXml,
-        );
-        await this.upsertFile(documentId, DocFileType.AUTHORIZED_XML, authUpload, 'application/xml');
-        break;
-      } catch (s3Err: any) {
-        this.logger.warn(`Failed to upload authorized XML (attempt ${attempt + 1}/3): ${s3Err.message}`);
-        if (attempt < 2) await this.sleep(2000 * (attempt + 1));
-        else this.logger.error(`CRITICAL: Authorized XML upload failed for document ${documentId} after 3 attempts`);
+    if (!authorizedXml) {
+      this.logger.error(
+        `CRITICAL: No authorized XML content available for document ${documentId} ` +
+        `(SRI response had no comprobante and no local signedXml fallback) — skipping upload instead of storing an empty file.`,
+      );
+    } else {
+      xmlBuffer = Buffer.from(authorizedXml, 'utf-8');
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const authUpload = await this.s3Service.uploadXml(
+            doc.company.ruc, doc.accessKey, 'authorized', authorizedXml,
+          );
+          await this.upsertFile(documentId, DocFileType.AUTHORIZED_XML, authUpload, 'application/xml');
+          break;
+        } catch (s3Err: any) {
+          this.logger.warn(`Failed to upload authorized XML (attempt ${attempt + 1}/3): ${s3Err.message}`);
+          if (attempt < 2) await this.sleep(2000 * (attempt + 1));
+          else this.logger.error(`CRITICAL: Authorized XML upload failed for document ${documentId} after 3 attempts`);
+        }
       }
     }
 

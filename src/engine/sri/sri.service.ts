@@ -386,7 +386,9 @@ export class SriService {
     const authDateMatch = xml.match(/<fechaAutorizacion>([^<]+)<\/fechaAutorizacion>/);
     const authorizedAt = authDateMatch?.[1] ?? null;
 
-    const compMatch = xml.match(/<comprobante><!\[CDATA\[([\s\S]*?)\]\]><\/comprobante>/);
+    // Tolerante a espacios/saltos de línea entre <comprobante> y el CDATA —
+    // el SRI no siempre los devuelve pegados (bug detectado en incidente 2026-08-31).
+    const compMatch = xml.match(/<comprobante>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/comprobante>/);
     const authorizedXml = compMatch?.[1] ?? null;
 
     const messages = this.extractMessages(xml);
