@@ -391,6 +391,14 @@ export class SriService {
     const compMatch = xml.match(/<comprobante>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/comprobante>/);
     const authorizedXml = compMatch?.[1] ?? null;
 
+    if (state === SRI_STATE_AUTHORIZED && !authorizedXml) {
+      this.logger.warn(
+        `DEBUG: authorizedXml extraction failed for AUTORIZADO response. ` +
+        `len=${xml.length}, hasComprobante=${xml.includes('comprobante')}, hasCDATA=${xml.includes('CDATA')}. ` +
+        `Snippet around 'comprobante': ${xml.slice(Math.max(0, xml.indexOf('comprobante') - 50), xml.indexOf('comprobante') + 200)}`,
+      );
+    }
+
     const messages = this.extractMessages(xml);
 
     return {
