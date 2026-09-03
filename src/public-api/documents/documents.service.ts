@@ -23,6 +23,7 @@ import { S3StorageService } from '../../engine/storage/s3.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { DOCUMENT_QUEUE } from '../../queues/queues.constants';
 import { formatDateTz } from '../../common/utils/date.util';
+import { isValidIdentification, isValidCedulaOrRuc } from '../../common/utils/ecuador-id.util';
 import { NotificationService } from '../../notifications/notification.service';
 
 /** States where a document can be corrected and reprocessed */
@@ -418,6 +419,7 @@ export class PublicDocumentsService {
     const docType = dto.tipoDocumento as SriDocTypeCode;
     this.validateDocType(docType);
     this.validateDocTypeFields(docType, dto);
+    this.validateIdentifications(dto);
 
     const hasCert = await this.certRepo.findOne({
       where: { companyId: company.id, isCurrent: true },
@@ -636,6 +638,8 @@ export class PublicDocumentsService {
    * because the old key is "burned" and will trigger error 70 at reception.
    */
   private async resetAndUpdateDocument(doc: Document, company: Company, dto: CreateDocumentDto): Promise<void> {
+    this.validateIdentifications(dto);
+
     // Clean old processing artifacts
     await this.timelineRepo.delete({ documentId: doc.id });
     await this.errorRepo.delete({ documentId: doc.id });
@@ -789,6 +793,43 @@ export class PublicDocumentsService {
       if (missing.length > 0) {
         throw new BadRequestException(
           `Campos requeridos para ${docType}: ${missing.join(', ')}.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Valida cédula/RUC/pasaporte de comprador, transportista, destinatarios y
+   * proveedores de reembolso antes de enviar al SRI, evitando rechazos por
+   * identificaciones con formato o dígito verificador inválido.
+   */
+  private validateIdentifications(dto: CreateDocumentDto) {
+    if (!isValidIdentification(dto.tipoIdentificacionComprador, dto.identificacionComprador)) {
+      throw new BadRequestException(
+        `identificacionComprador "${dto.identificacionComprador}" no es válida para tipoIdentificacionComprador "${dto.tipoIdentificacionComprador}".`,
+      );
+    }
+
+    if (dto.tipoIdentificacionTransportista && dto.rucTransportista) {
+      if (!isValidIdentification(dto.tipoIdentificacionTransportista, dto.rucTransportista)) {
+        throw new BadRequestException(
+          `rucTransportista "${dto.rucTransportista}" no es válido para tipoIdentificacionTransportista "${dto.tipoIdentificacionTransportista}".`,
+        );
+      }
+    }
+
+    for (const destinatario of dto.destinatarios ?? []) {
+      if (!isValidCedulaOrRuc(destinatario.identificacionDestinatario)) {
+        throw new BadRequestException(
+          `identificacionDestinatario "${destinatario.identificacionDestinatario}" no es una cédula ni un RUC válido.`,
+        );
+      }
+    }
+
+    for (const reembolso of dto.reembolsos ?? []) {
+      if (!isValidIdentification(reembolso.tipoIdentificacionProveedorReembolso, reembolso.identificacionProveedorReembolso)) {
+        throw new BadRequestException(
+          `identificacionProveedorReembolso "${reembolso.identificacionProveedorReembolso}" no es válida para tipoIdentificacionProveedorReembolso "${reembolso.tipoIdentificacionProveedorReembolso}".`,
         );
       }
     }
