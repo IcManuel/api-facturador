@@ -500,6 +500,27 @@ export class PublicDocumentsService {
       }
       sequential = dto.secuencial.padStart(9, '0');
       fullSequential = `${company.establishment}-${emissionPoint}-${sequential}`;
+
+      const sequentialTaken = await this.docRepo.findOne({
+        where: {
+          companyId: company.id,
+          typeCode: docType,
+          establishment: company.establishment,
+          emissionPoint,
+          sequential: fullSequential,
+        },
+      });
+      if (sequentialTaken) {
+        throw new ConflictException({
+          message: `El secuencial ${sequential} ya fue usado para este tipo de documento, establecimiento y punto de emisión.`,
+          documentoExistente: {
+            id: sequentialTaken.id,
+            secuencial: sequentialTaken.sequential,
+            claveAcceso: sequentialTaken.accessKey,
+            estado: sequentialTaken.status,
+          },
+        });
+      }
     } else {
       if (dto.secuencial) {
         throw new BadRequestException(
