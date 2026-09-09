@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateCompanyInfoDto {
@@ -29,4 +29,15 @@ export class UpdateCompanyInfoDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Código de establecimiento (3 dígitos). Los comprobantes ya emitidos conservan su establecimiento; ' +
+      'los nuevos usan este y arrancan una serie de secuenciales propia para el establecimiento.',
+    example: '002',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{3}$/, { message: 'establishment debe ser numérico de 3 dígitos' })
+  establishment?: string;
 }

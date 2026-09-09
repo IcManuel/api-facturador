@@ -15,6 +15,7 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { UploadCertificateDto } from '../../client/companies/dto/upload-certificate.dto';
 import { CreateEmissionPointDto } from '../../admin/companies/dto/create-emission-point.dto';
 import { UpdateEmissionPointDto } from '../../admin/companies/dto/update-emission-point.dto';
+import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 import { UpdateCompanyInfoDto } from './dto/update-company-info.dto';
 import { UpdateCompanyRucDto } from './dto/update-company-ruc.dto';
 import { imageFileFilter, resolveImageMime } from '../../common/utils/image-upload.util';
@@ -113,6 +114,29 @@ export class InfoController {
   ) {
     if (!file) throw new BadRequestException('Archivo .p12 requerido');
     return this.service.uploadCertificate(companyId, file.buffer, file.originalname, dto.password);
+  }
+
+  // ── Secuenciales ──
+
+  @Get('sequentials')
+  @ApiOperation({
+    summary: 'Listar secuenciales de la empresa',
+    description: 'Devuelve, por serie (tipo de documento + establecimiento + punto de emisión), el próximo secuencial que se usará.',
+  })
+  getSequentials(@CurrentCompany('id') companyId: number) {
+    return this.service.getSequentials(companyId);
+  }
+
+  @Put('sequentials')
+  @ApiOperation({
+    summary: 'Fijar el próximo secuencial de una serie',
+    description: 'Útil al migrar desde otro sistema para continuar la numeración en vez de arrancar en 1. Crea la serie si no existe.',
+  })
+  setSequential(
+    @CurrentCompany('id') companyId: number,
+    @Body() dto: SetSequentialDto,
+  ) {
+    return this.service.setSequential(companyId, dto);
   }
 
   @Post('regenerate-key')

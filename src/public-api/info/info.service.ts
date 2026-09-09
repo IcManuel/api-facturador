@@ -6,6 +6,7 @@ import { Company } from '../../entities/company.entity';
 import { Certificate } from '../../entities/certificate.entity';
 import { Document } from '../../entities/document.entity';
 import { EmissionPoint } from '../../entities/emission-point.entity';
+import { CompanySeries } from '../../entities/company-series.entity';
 import { Account } from '../../entities/account.entity';
 import { CertificatesService } from '../../admin/certificates/certificates.service';
 import { S3StorageService } from '../../engine/storage/s3.service';
@@ -14,6 +15,7 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { UpdateCompanyInfoDto } from './dto/update-company-info.dto';
 import { CreateEmissionPointDto } from '../../admin/companies/dto/create-emission-point.dto';
 import { UpdateEmissionPointDto } from '../../admin/companies/dto/update-emission-point.dto';
+import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 
 @Injectable()
 export class InfoService {
@@ -26,6 +28,8 @@ export class InfoService {
     private readonly docRepo: Repository<Document>,
     @InjectRepository(EmissionPoint)
     private readonly emissionPointRepo: Repository<EmissionPoint>,
+    @InjectRepository(CompanySeries)
+    private readonly companySeriesRepo: Repository<CompanySeries>,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
     private readonly certificatesService: CertificatesService,
@@ -44,6 +48,7 @@ export class InfoService {
     if (dto.email !== undefined) patch.email = dto.email;
     if (dto.phone !== undefined) patch.phone = dto.phone;
     if (dto.address !== undefined) patch.address = dto.address;
+    if (dto.establishment !== undefined) patch.establishment = dto.establishment;
     await this.companyRepo.update(company.id, patch);
     const updated = await this.companyRepo.findOne({
       where: { id: company.id },
@@ -201,6 +206,59 @@ export class InfoService {
     return { message: `Punto de emisión ${ep.code} eliminado.` };
   }
 
+  /* ────────── Secuenciales ────────── */
+
+  /**
+   * Series de secuenciales de la empresa. `nextSequential` es el número que
+   * usará el próximo comprobante de esa serie (tipo + establecimiento + punto).
+   */
+  async getSequentials(companyId: number) {
+    const series = await this.companySeriesRepo.find({
+      where: { companyId },
+      order: { docType: 'ASC', establishment: 'ASC', emissionPoint: 'ASC' },
+    });
+
+    return series.map((s) => ({
+      docType: s.docType,
+      establishment: s.establishment,
+      emissionPoint: s.emissionPoint,
+      nextSequential: s.nextSequential,
+      nextSequentialFormatted: String(s.nextSequential).padStart(9, '0'),
+    }));
+  }
+
+  /**
+   * Fija el próximo secuencial de una serie. Útil al migrar desde otro sistema
+   * para continuar la numeración en vez de arrancar en 1.
+   */
+  async setSequential(companyId: number, dto: SetSequentialDto) {
+    await this.companySeriesRepo.query(
+      `INSERT INTO app.company_series
+         (com_id, cse_doc_type, cse_establishment, cse_emission_point, cse_next_sequential)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (com_id, cse_doc_type, cse_establishment, cse_emission_point)
+       DO UPDATE SET cse_next_sequential = $5`,
+      [companyId, dto.docType, dto.establishment, dto.emissionPoint, dto.nextSequential],
+    );
+
+    const serie = await this.companySeriesRepo.findOne({
+      where: {
+        companyId,
+        docType: dto.docType,
+        establishment: dto.establishment,
+        emissionPoint: dto.emissionPoint,
+      },
+    });
+
+    return {
+      docType: serie!.docType,
+      establishment: serie!.establishment,
+      emissionPoint: serie!.emissionPoint,
+      nextSequential: serie!.nextSequential,
+      nextSequentialFormatted: String(serie!.nextSequential).padStart(9, '0'),
+    };
+  }
+
   getCompanyInfo(company: Company) {
     return {
       id: company.id,
@@ -210,6 +268,8 @@ export class InfoService {
       environment: company.env,
       status: company.status,
       establishment: company.establishment,
+      accessKeyMode: company.accessKeyMode,
+      sequentialMode: company.sequentialMode,
       plan: company.plan ? {
         name: company.plan.name,
         tier: company.plan.tier,
