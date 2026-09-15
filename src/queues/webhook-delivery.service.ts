@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -11,6 +11,7 @@ import { WebhookEvent } from '../entities/webhook-event.entity';
 import { DocStatus } from '../entities/enums';
 import { WEBHOOK_QUEUE } from './queues.constants';
 import { formatDateTz } from '../common/utils/date.util';
+import { DocumentStatusNotifier } from '../engine/processing/document-status-notifier';
 
 export type DocumentWebhookEvent =
   | 'document.received'
@@ -34,7 +35,7 @@ interface WebhookJobData {
 }
 
 @Injectable()
-export class WebhookDeliveryService {
+export class WebhookDeliveryService implements OnModuleInit {
   private readonly logger = new Logger(WebhookDeliveryService.name);
 
   constructor(
@@ -42,7 +43,12 @@ export class WebhookDeliveryService {
     @InjectRepository(Company) private readonly companyRepo: Repository<Company>,
     @InjectRepository(WebhookEvent) private readonly eventRepo: Repository<WebhookEvent>,
     @InjectQueue(WEBHOOK_QUEUE) private readonly queue: Queue,
+    private readonly statusNotifier: DocumentStatusNotifier,
   ) {}
+
+  onModuleInit() {
+    this.statusNotifier.register((documentId, status) => this.enqueueForStatus(documentId, status));
+  }
 
   /**
    * Enqueue a webhook for a document state transition. Safe to call from inside

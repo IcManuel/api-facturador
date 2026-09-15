@@ -12,6 +12,7 @@ import { S3StorageService } from './storage/s3.service';
 import { RideService } from './ride/ride.service';
 import { DocumentProcessingService } from './processing/document-processing.service';
 import { StaleDocumentCron } from './processing/stale-document.cron';
+import { DocumentStatusNotifier } from './processing/document-status-notifier';
 import { CryptoService } from '../common/services/crypto.service';
 import { MailService } from '../common/services/mail.service';
 import { RedisLockService } from '../common/services/redis-lock.service';
@@ -39,6 +40,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     S3StorageService,
     RideService,
     DocumentProcessingService,
+    DocumentStatusNotifier,
     StaleDocumentCron,
     CryptoService,
     MailService,
@@ -54,6 +56,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     S3StorageService,
     RideService,
     DocumentProcessingService,
+    DocumentStatusNotifier,
   ],
 })
 export class EngineModule {}

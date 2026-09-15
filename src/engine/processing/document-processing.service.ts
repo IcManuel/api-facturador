@@ -1,3 +1,4 @@
+import { DocumentStatusNotifier } from './document-status-notifier';
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -30,6 +31,13 @@ export interface ProcessingResult {
   processingTimeMs: number;
 }
 
+const STATUS_FOR_RESULT: Record<ProcessingResult['status'], DocStatus> = {
+  authorized: DocStatus.AUTHORIZED,
+  rejected: DocStatus.REJECTED,
+  failed: DocStatus.FAILED,
+  processing: DocStatus.RECEIVED,
+};
+
 @Injectable()
 export class DocumentProcessingService {
   private readonly logger = new Logger(DocumentProcessingService.name);
@@ -55,13 +63,23 @@ export class DocumentProcessingService {
     private readonly mailService: MailService,
     private readonly eventsGateway: EventsGateway,
     private readonly notificationService: NotificationService,
+    private readonly statusNotifier: DocumentStatusNotifier,
   ) {}
 
   /**
    * Full document processing pipeline: XML generation -> sign -> SRI send -> authorization.
    * Used by both the BullMQ worker (async) and the sync endpoint.
+   *
+   * Avisa el resultado por DocumentStatusNotifier (→ webhook), sea quien sea
+   * quien lo llame. Ver la cabecera de DocumentStatusNotifier.
    */
   async processDocument(documentId: number): Promise<ProcessingResult> {
+    const result = await this.runPipeline(documentId);
+    await this.statusNotifier.notify(documentId, STATUS_FOR_RESULT[result.status]);
+    return result;
+  }
+
+  private async runPipeline(documentId: number): Promise<ProcessingResult> {
     const startTime = Date.now();
     const collectedErrors: ProcessingResult['errors'] = [];
 
@@ -490,8 +508,19 @@ export class DocumentProcessingService {
   /**
    * Retry only the authorization check for a document already sent to SRI (status RECEIVED).
    * Used by the delayed auth-check job and the manual retry endpoint.
+   *
+   * Solo avisa resultados finales: si sigue 'processing' el documento no cambió
+   * de estado (ya estaba RECEIVED) y repetir el aviso en cada consulta sería ruido.
    */
   async retryAuthorization(documentId: number): Promise<ProcessingResult> {
+    const result = await this.runAuthorizationCheck(documentId);
+    if (result.status !== 'processing') {
+      await this.statusNotifier.notify(documentId, STATUS_FOR_RESULT[result.status]);
+    }
+    return result;
+  }
+
+  private async runAuthorizationCheck(documentId: number): Promise<ProcessingResult> {
     const startTime = Date.now();
 
     const doc = await this.docRepo.findOne({
@@ -1520,6 +1549,7 @@ export class DocumentProcessingService {
       doc.authNumber = sriAuth.authorizationNumber ?? doc.accessKey;
       doc.authAt = sriAuth.authorizedAt ? new Date(sriAuth.authorizedAt) : new Date();
       await this.docRepo.save(doc);
+      await this.statusNotifier.notify(doc.id, DocStatus.AUTHORIZED);
       this.logger.log(
         `reissueToday: doc ${documentId} was actually AUTHORIZED at SRI (auth=${doc.authNumber}). No reissue needed.`,
       );

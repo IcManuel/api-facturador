@@ -7,6 +7,7 @@ import { DocumentError } from '../../entities/document-error.entity';
 import { DocStatus, SriErrorCategory } from '../../entities/enums';
 import { SriService } from '../sri/sri.service';
 import { DocumentProcessingService } from './document-processing.service';
+import { DocumentStatusNotifier } from './document-status-notifier';
 import { EventsGateway } from '../../events/events.gateway';
 import { RedisLockService } from '../../common/services/redis-lock.service';
 import { NotificationService } from '../../notifications/notification.service';
@@ -46,6 +47,7 @@ export class StaleDocumentCron {
     private readonly eventsGateway: EventsGateway,
     private readonly redisLock: RedisLockService,
     private readonly notificationService: NotificationService,
+    private readonly statusNotifier: DocumentStatusNotifier,
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -296,6 +298,8 @@ export class StaleDocumentCron {
   }
 
   private emitStatus(doc: Document, status: string) {
+    // Cada cambio de estado del cron sale también como webhook.
+    void this.statusNotifier.notify(doc.id, status as DocStatus);
     try {
       this.eventsGateway.emitDocumentUpdate({
         documentId: doc.id,

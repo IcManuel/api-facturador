@@ -93,7 +93,6 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       // System/network failure: schedule a delayed automatic retry instead of
       // leaving the document dead. Business errors are not auto-retried.
       await this.maybeScheduleSystemRetry(documentId, result);
-      await this.fireWebhook(documentId, DocStatus.FAILED);
       return;
     }
 
@@ -103,15 +102,11 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
     if (result.status === 'processing') {
       // SRI accepted but hasn't authorized yet — schedule delayed auth check
       await this.scheduleAuthCheck(documentId, 0);
-      await this.fireWebhook(documentId, DocStatus.RECEIVED);
       return;
     }
 
-    if (result.status === 'authorized') {
-      await this.fireWebhook(documentId, DocStatus.AUTHORIZED);
-    } else if (result.status === 'rejected') {
-      await this.fireWebhook(documentId, DocStatus.REJECTED);
-    }
+    // Los webhooks de este resultado ya los envía processDocument() a través de
+    // DocumentStatusNotifier; enviarlos también aquí los duplicaría.
 
     this.logger.log(`Document ${documentId} finished: ${result.status} in ${result.processingTimeMs}ms`);
   }
@@ -224,13 +219,7 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       return;
     }
 
-    if (result.status === 'authorized') {
-      await this.fireWebhook(documentId, DocStatus.AUTHORIZED);
-    } else if (result.status === 'rejected') {
-      await this.fireWebhook(documentId, DocStatus.REJECTED);
-    } else if (result.status === 'failed') {
-      await this.fireWebhook(documentId, DocStatus.FAILED);
-    }
+    // El aviso de authorized/rejected/failed ya lo da retryAuthorization().
 
     this.logger.log(`Auth check for document ${documentId}: ${result.status}`);
   }
