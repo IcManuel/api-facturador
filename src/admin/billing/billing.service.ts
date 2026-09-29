@@ -85,6 +85,7 @@ export class BillingService {
       FROM app.company c
       JOIN app.subscription_plan p ON p.spl_id = c.spl_id
       LEFT JOIN app.document d ON d.com_id = c.com_id
+        AND d.doc_env = 'production'
         AND d.doc_created_at >= $1
         AND d.doc_created_at < $2
       WHERE c.acc_id = $3
@@ -198,6 +199,7 @@ export class BillingService {
         FROM app.company c
         JOIN app.subscription_plan p ON p.spl_id = c.spl_id
         LEFT JOIN app.document d ON d.com_id = c.com_id
+          AND d.doc_env = 'production'
           AND d.doc_created_at >= $1
           AND d.doc_created_at < $2
         WHERE c.acc_id = $3 AND c.com_is_active = true
@@ -506,6 +508,7 @@ export class BillingService {
         FROM app.company c
         JOIN app.subscription_plan p ON p.spl_id = c.spl_id
         LEFT JOIN app.document d ON d.com_id = c.com_id
+          AND d.doc_env = 'production'
           AND d.doc_created_at >= $1
           AND d.doc_created_at < $2
         WHERE c.acc_id = $3 AND c.com_is_active = true
