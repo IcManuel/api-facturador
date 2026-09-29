@@ -589,4 +589,171 @@ export class BillingService {
     this.logger.log(`Anniversary billing for ${today.toISOString().slice(0, 10)}: matched=${accounts.length}, created=${created}, skipped=${skipped}`);
     return { created, skipped, matched: accounts.length };
   }
+
+  /* ────────── Reporte diario de cobros ────────── */
+
+  /**
+   * Quién debe pagar hoy: cuentas activas cuyo día de corte (día de activación)
+   * cae hoy, con el monto que les corresponde en el ciclo que acaba de cerrar.
+   *
+   * - Planes con cuota fija: se cobra la cuota, más el excedente si está habilitado.
+   * - Planes por uso (payperuse): se cobra por comprobante AUTORIZADO en producción,
+   *   por lo que solo aparecen si efectivamente emitieron.
+   * - Planes ilimitados, cuentas internas y cuentas que no están activas quedan fuera.
+   *
+   * Solo se listan las cuentas con monto mayor a cero.
+   */
+  async getCollectionsDueToday(now: Date = new Date()) {
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayDay = today.getDate();
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+
+    // Si hoy es el último día del mes, también entran las cuentas cuyo día de corte
+    // no existe en este mes (p. ej. corte 31 en un mes de 30 días).
+    const cycleDays: number[] = [todayDay];
+    if (todayDay === daysInMonth) {
+      for (let d = todayDay + 1; d <= 31; d++) cycleDays.push(d);
+    }
+
+    const periodStart = this.prevCycleDate(today);
+    const periodStartStr = periodStart.toISOString().slice(0, 10);
+    const periodEnd = new Date(today);
+    periodEnd.setDate(periodEnd.getDate() - 1);
+    const periodEndStr = periodEnd.toISOString().slice(0, 10);
+    const todayStr = today.toISOString().slice(0, 10);
+
+    const rows: any[] = await this.dataSource.query(
+      `SELECT
+         a.acc_id                AS "accountId",
+         a.acc_name              AS "accountName",
+         a.acc_email             AS "accountEmail",
+         a.acc_phone             AS "accountPhone",
+         a.acc_billing_cycle_day AS "cycleDay",
+         c.com_id                AS "companyId",
+         c.com_name              AS "companyName",
+         c.com_ruc               AS "companyRuc",
+         p.spl_name              AS "planName",
+         p.spl_tier              AS "planTier",
+         p.spl_monthly_price     AS "planPrice",
+         p.spl_doc_limit         AS "docLimit",
+         p.spl_overage_price     AS "overagePrice",
+         c.com_overage_enabled   AS "overageEnabled",
+         COUNT(d.doc_id) FILTER (WHERE d.doc_env = 'production')::int AS "docsTotal",
+         COUNT(d.doc_id) FILTER (WHERE d.doc_env = 'production' AND d.doc_status = 'AUTHORIZED')::int AS "docsAuthorized"
+       FROM app.account a
+       JOIN app.company c ON c.acc_id = a.acc_id AND c.com_is_active = true
+       JOIN app.subscription_plan p ON p.spl_id = c.spl_id
+       LEFT JOIN app.document d ON d.com_id = c.com_id
+            AND d.doc_created_at >= $1 AND d.doc_created_at < $2
+       WHERE a.acc_status = $3
+         AND a.acc_is_active = true
+         AND a.acc_is_internal = false
+         AND a.acc_billing_cycle_day = ANY($4)
+       GROUP BY a.acc_id, a.acc_name, a.acc_email, a.acc_phone, a.acc_billing_cycle_day,
+                c.com_id, c.com_name, c.com_ruc, p.spl_name, p.spl_tier, p.spl_monthly_price,
+                p.spl_doc_limit, p.spl_overage_price, c.com_overage_enabled
+       ORDER BY a.acc_name, c.com_name`,
+      [`${periodStartStr}T00:00:00`, `${todayStr}T00:00:00`, AccountStatus.ACTIVE, cycleDays],
+    );
+
+    const byAccount = new Map<number, any>();
+
+    for (const r of rows) {
+      const planPrice = Number(r.planPrice ?? 0);
+      const overagePrice = Number(r.overagePrice ?? 0);
+      const docLimit = r.docLimit ? Number(r.docLimit) : null;
+      const docsTotal = Number(r.docsTotal);
+      const docsAuthorized = Number(r.docsAuthorized);
+
+      let base = 0;
+      let overageDocs = 0;
+
+      if (r.planTier === PlanTier.UNLIMITED) {
+        // sin cargo
+      } else if (r.planTier === PlanTier.PAYPERUSE) {
+        overageDocs = docsAuthorized;
+      } else {
+        base = planPrice;
+        if (docLimit !== null && r.overageEnabled) {
+          overageDocs = Math.max(0, docsTotal - docLimit);
+        }
+      }
+
+      const overageAmount = Math.round(overageDocs * overagePrice * 100) / 100;
+      const subtotal = Math.round((base + overageAmount) * 100) / 100;
+
+      if (!byAccount.has(r.accountId)) {
+        byAccount.set(r.accountId, {
+          accountId: r.accountId,
+          accountName: r.accountName,
+          accountEmail: r.accountEmail,
+          accountPhone: r.accountPhone,
+          cycleDay: r.cycleDay,
+          companies: [],
+          total: 0,
+        });
+      }
+
+      const acc = byAccount.get(r.accountId);
+      acc.companies.push({
+        companyId: r.companyId,
+        companyName: r.companyName,
+        companyRuc: r.companyRuc,
+        planName: r.planName,
+        planTier: r.planTier,
+        base,
+        docsTotal,
+        docsAuthorized,
+        docLimit,
+        overageDocs,
+        overageAmount,
+        subtotal,
+      });
+      acc.total = Math.round((acc.total + subtotal) * 100) / 100;
+    }
+
+    const accounts = [...byAccount.values()]
+      .filter((a) => a.total > 0)
+      .sort((a, b) => b.total - a.total);
+
+    // Saldos de períodos anteriores que siguen sin pagarse
+    const overdue: any[] = await this.dataSource.query(
+      `SELECT
+         a.acc_id    AS "accountId",
+         a.acc_name  AS "accountName",
+         a.acc_email AS "accountEmail",
+         bp.bpe_id   AS "periodId",
+         bp.bpe_year AS "year",
+         bp.bpe_month AS "month",
+         bp.bpe_status AS "status",
+         bp.bpe_total AS "total",
+         COALESCE(bp.bpe_paid_amount, 0) AS "paid",
+         bp.bpe_period_end_date AS "periodEnd"
+       FROM app.billing_period bp
+       JOIN app.account a ON a.acc_id = bp.acc_id
+       WHERE bp.bpe_status IN ('pending', 'partial', 'overdue')
+         AND bp.bpe_total > COALESCE(bp.bpe_paid_amount, 0)
+         AND a.acc_is_internal = false
+         AND COALESCE(bp.bpe_period_end_date, make_date(bp.bpe_year, bp.bpe_month, 1)) < $1::date
+       ORDER BY bp.bpe_year, bp.bpe_month, a.acc_name`,
+      [todayStr],
+    );
+
+    const overdueRows = overdue.map((o) => ({
+      ...o,
+      total: Number(o.total),
+      paid: Number(o.paid),
+      balance: Math.round((Number(o.total) - Number(o.paid)) * 100) / 100,
+    }));
+
+    return {
+      date: todayStr,
+      periodStart: periodStartStr,
+      periodEnd: periodEndStr,
+      accounts,
+      totalDueToday: Math.round(accounts.reduce((s, a) => s + a.total, 0) * 100) / 100,
+      overdue: overdueRows,
+      totalOverdue: Math.round(overdueRows.reduce((s, o) => s + o.balance, 0) * 100) / 100,
+    };
+  }
 }

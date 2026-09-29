@@ -575,4 +575,122 @@ export class NotificationService {
       </div>
     `;
   }
+
+  /* ────────── Reporte diario de cobros (interno) ────────── */
+
+  async sendCollectionsReport(
+    recipients: string[],
+    data: {
+      date: string;
+      periodStart: string;
+      periodEnd: string;
+      accounts: Array<{
+        accountName: string;
+        accountEmail: string;
+        accountPhone?: string | null;
+        cycleDay: number;
+        total: number;
+        companies: Array<{
+          companyName: string;
+          companyRuc: string;
+          planName: string;
+          planTier: string;
+          base: number;
+          docsAuthorized: number;
+          overageDocs: number;
+          overageAmount: number;
+          subtotal: number;
+        }>;
+      }>;
+      totalDueToday: number;
+      overdue: Array<{
+        accountName: string;
+        year: number;
+        month: number;
+        status: string;
+        balance: number;
+      }>;
+      totalOverdue: number;
+    },
+  ): Promise<void> {
+    const money = (n: number) => `$${n.toFixed(2)}`;
+    const fecha = new Date(`${data.date}T12:00:00`).toLocaleDateString('es-EC', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    });
+
+    const accountBlocks = data.accounts
+      .map((a) => {
+        const detalle = a.companies
+          .map((c) => {
+            const concepto =
+              c.planTier === 'payperuse'
+                ? `${c.overageDocs} comprobante(s) autorizado(s) × ${money(c.overageDocs ? c.overageAmount / c.overageDocs : 0)}`
+                : c.overageDocs > 0
+                  ? `Cuota ${money(c.base)} + ${c.overageDocs} excedente(s) ${money(c.overageAmount)}`
+                  : `Cuota ${money(c.base)}`;
+            return `
+              <tr>
+                <td style="padding:4px 8px;font-size:12px">${this.escapeHtml(c.companyName)}<br>
+                  <span style="color:#888">${this.escapeHtml(c.companyRuc)}</span></td>
+                <td style="padding:4px 8px;font-size:12px">${this.escapeHtml(c.planName)}</td>
+                <td style="padding:4px 8px;font-size:12px">${concepto}</td>
+                <td style="padding:4px 8px;font-size:12px;text-align:right"><b>${money(c.subtotal)}</b></td>
+              </tr>`;
+          })
+          .join('');
+
+        return `
+          <div style="border:1px solid #eee;border-radius:8px;padding:12px;margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between">
+              <b style="font-size:14px">${this.escapeHtml(a.accountName)}</b>
+              <b style="font-size:16px;color:#16a34a">${money(a.total)}</b>
+            </div>
+            <div style="color:#666;font-size:12px;margin-bottom:8px">
+              ${this.escapeHtml(a.accountEmail)}${a.accountPhone ? ` · ${this.escapeHtml(a.accountPhone)}` : ''} · corte día ${a.cycleDay}
+            </div>
+            <table style="width:100%;border-collapse:collapse">${detalle}</table>
+          </div>`;
+      })
+      .join('');
+
+    const sinCobros = `
+      <p style="font-size:14px;color:#666">Hoy no hay ninguna cuenta que corte. Nada que cobrar.</p>`;
+
+    const overdueBlock = data.overdue.length
+      ? `
+        <h3 style="font-size:14px;margin-top:24px">Saldos de períodos anteriores (${money(data.totalOverdue)})</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          ${data.overdue
+            .map(
+              (o) => `
+            <tr>
+              <td style="padding:4px 8px">${this.escapeHtml(o.accountName)}</td>
+              <td style="padding:4px 8px;color:#888">${String(o.month).padStart(2, '0')}/${o.year}</td>
+              <td style="padding:4px 8px;color:${o.status === 'overdue' ? '#dc2626' : '#888'}">${o.status}</td>
+              <td style="padding:4px 8px;text-align:right"><b>${money(o.balance)}</b></td>
+            </tr>`,
+            )
+            .join('')}
+        </table>`
+      : '';
+
+    const html = this.wrap(`
+      <h2 style="font-size:18px;margin-bottom:4px">Cobros de hoy — ${fecha}</h2>
+      <p style="color:#666;font-size:13px;margin-top:0">
+        Ciclo facturado: ${data.periodStart} al ${data.periodEnd}
+      </p>
+      <p style="font-size:15px">
+        <b>${data.accounts.length}</b> cuenta(s) por cobrar ·
+        <b style="color:#16a34a">${money(data.totalDueToday)}</b>
+      </p>
+      ${data.accounts.length ? accountBlocks : sinCobros}
+      ${overdueBlock}
+    `);
+
+    const subject = data.accounts.length
+      ? `Cobros de hoy: ${data.accounts.length} cuenta(s) — ${money(data.totalDueToday)}`
+      : 'Cobros de hoy: ninguno';
+
+    await this.send(recipients, subject, html);
+  }
 }

@@ -6,6 +6,7 @@ import { Account } from '../../entities/account.entity';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 import { BillingCron } from './billing.cron';
+import { CollectionsReportCron } from './collections-report.cron';
 import { NotificationsModule } from '../../notifications/notifications.module';
 import { RedisLockService } from '../../common/services/redis-lock.service';
 
@@ -15,6 +16,6 @@ import { RedisLockService } from '../../common/services/redis-lock.service';
     NotificationsModule,
   ],
   controllers: [BillingController],
-  providers: [BillingService, BillingCron, RedisLockService],
+  providers: [BillingService, BillingCron, CollectionsReportCron, RedisLockService],
 })
 export class BillingModule {}

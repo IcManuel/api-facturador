@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { BillingService } from './billing.service';
+import { CollectionsReportCron } from './collections-report.cron';
 import { BillingStatus } from '../../entities/enums';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -20,7 +21,36 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @ApiBearerAuth()
 @Controller('admin/billing')
 export class BillingController {
-  constructor(private readonly service: BillingService) {}
+  constructor(
+    private readonly service: BillingService,
+    private readonly collectionsReport: CollectionsReportCron,
+  ) {}
+
+  @Get('collections-report')
+  @ApiOperation({
+    summary: 'Reporte de cobros del día (quién debe pagar hoy)',
+    description:
+      'Devuelve las cuentas activas cuyo día de corte cae en la fecha indicada, con el monto a cobrar. ' +
+      'Con send=true además envía el correo, igual que el cron diario de las 08:00.',
+  })
+  @ApiQuery({ name: 'date', type: String, required: false, description: 'YYYY-MM-DD (por defecto, hoy)' })
+  @ApiQuery({ name: 'send', type: Boolean, required: false, description: 'true para enviar el correo' })
+  async collectionsReportToday(
+    @Query('date') date?: string,
+    @Query('send') send?: string,
+  ) {
+    let when = new Date();
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        throw new BadRequestException('date debe tener formato YYYY-MM-DD');
+      }
+      when = new Date(`${date}T12:00:00`);
+    }
+    if (send === 'true' || send === '1') {
+      return this.collectionsReport.sendReport(when);
+    }
+    return this.service.getCollectionsDueToday(when);
+  }
 
   @Get()
   @ApiOperation({ summary: 'Listar periodos de facturación' })
