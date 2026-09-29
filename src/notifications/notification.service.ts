@@ -693,4 +693,57 @@ export class NotificationService {
 
     await this.send(recipients, subject, html);
   }
+
+  /* ────────── Recordatorio de pago consolidado (una cuenta, todos sus períodos) ────────── */
+
+  async sendPaymentReminder(data: {
+    accountName: string;
+    accountEmail: string;
+    companyEmails: Array<{ email: string | null; notificationEmail: string | null }>;
+    periods: Array<{ year: number; month: number; balance: number }>;
+    total: number;
+  }): Promise<void> {
+    const monthNames = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
+      'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+    const rows = data.periods
+      .map(
+        (p) => `
+        <tr>
+          <td style="padding:8px 12px;border:1px solid #e9ecef">${monthNames[p.month]} ${p.year}</td>
+          <td style="padding:8px 12px;border:1px solid #e9ecef;text-align:right">$${p.balance.toFixed(2)}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const html = this.wrap(`
+      <h2 style="margin-bottom:8px">Pago pendiente</h2>
+      <p style="color:#555;font-size:14px">
+        Hola, le escribimos de AutorizadorEC. La cuenta <strong>${this.escapeHtml(data.accountName)}</strong>
+        tiene ${data.periods.length === 1 ? 'un período pendiente' : `${data.periods.length} períodos pendientes`} de pago.
+      </p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
+        <tr>
+          <th style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;text-align:left">Período</th>
+          <th style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;text-align:right">Valor</th>
+        </tr>
+        ${rows}
+        <tr>
+          <td style="padding:8px 12px;border:1px solid #e9ecef;font-weight:600">Total</td>
+          <td style="padding:8px 12px;border:1px solid #e9ecef;font-weight:600;text-align:right">$${data.total.toFixed(2)}</td>
+        </tr>
+      </table>
+      <p style="color:#555;font-size:13px">
+        Para coordinar el pago, responda a este correo o escríbanos por WhatsApp y le enviamos los datos.
+        Si ya realizó el pago, ignore este mensaje.
+      </p>
+    `);
+
+    const recipients = this.collectAccountRecipients(data.accountEmail, data.companyEmails);
+    await this.send(
+      recipients,
+      `Pago pendiente — ${data.accountName} — $${data.total.toFixed(2)}`,
+      html,
+    );
+  }
 }

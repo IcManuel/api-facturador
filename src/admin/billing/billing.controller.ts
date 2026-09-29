@@ -89,6 +89,17 @@ export class BillingController {
     return this.service.generateBillingPeriods(body.year, body.month);
   }
 
+  @Post('remind')
+  @ApiOperation({
+    summary: 'Enviar recordatorio de pago',
+    description:
+      'Envía un correo por cuenta con todos sus períodos pendientes. Si no se envían accountIds, ' +
+      'se envía a todas las cuentas con saldo (sin contar las internas).',
+  })
+  async sendReminders(@Body() body: { accountIds?: number[] }) {
+    return this.service.sendPaymentReminders(body?.accountIds);
+  }
+
   @Get('debt-summary')
   @ApiOperation({ summary: 'Resumen de deuda por cuenta' })
   getDebtSummary() {

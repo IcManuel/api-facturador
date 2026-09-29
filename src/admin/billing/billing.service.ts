@@ -759,4 +759,59 @@ export class BillingService {
       totalOverdue: Math.round(overdueRows.reduce((s, o) => s + o.balance, 0) * 100) / 100,
     };
   }
+
+  /**
+   * Envía un recordatorio de pago consolidado (un correo por cuenta, con todos
+   * sus períodos pendientes). Si no se indican cuentas, toma todas las que
+   * tengan saldo, excluyendo las internas.
+   */
+  async sendPaymentReminders(accountIds?: number[]) {
+    const rows: any[] = await this.dataSource.query(
+      `SELECT bp.acc_id AS "accountId", bp.bpe_year AS "year", bp.bpe_month AS "month",
+              (bp.bpe_total - COALESCE(bp.bpe_paid_amount, 0)) AS "balance"
+       FROM app.billing_period bp
+       JOIN app.account a ON a.acc_id = bp.acc_id
+       WHERE bp.bpe_status IN ('pending', 'partial', 'overdue')
+         AND bp.bpe_total > COALESCE(bp.bpe_paid_amount, 0)
+         AND a.acc_is_internal = false
+         ${accountIds?.length ? 'AND bp.acc_id = ANY($1)' : ''}
+       ORDER BY bp.acc_id, bp.bpe_year, bp.bpe_month`,
+      accountIds?.length ? [accountIds] : [],
+    );
+
+    const byAccount = new Map<number, Array<{ year: number; month: number; balance: number }>>();
+    for (const r of rows) {
+      const list = byAccount.get(r.accountId) ?? [];
+      list.push({ year: r.year, month: r.month, balance: Number(r.balance) });
+      byAccount.set(r.accountId, list);
+    }
+
+    const sent: Array<{ accountId: number; accountName: string; total: number; periods: number }> = [];
+
+    for (const [accountId, periods] of byAccount) {
+      const account = await this.accountRepo.findOne({
+        where: { id: accountId },
+        relations: ['companies'],
+      });
+      if (!account) continue;
+
+      const total = Math.round(periods.reduce((s, p) => s + p.balance, 0) * 100) / 100;
+      const companyEmails = (account.companies ?? [])
+        .filter((c) => c.isActive)
+        .map((c) => ({ email: c.email, notificationEmail: c.notificationEmail }));
+
+      await this.notificationService.sendPaymentReminder({
+        accountName: account.name,
+        accountEmail: account.email,
+        companyEmails,
+        periods,
+        total,
+      });
+
+      sent.push({ accountId, accountName: account.name, total, periods: periods.length });
+      this.logger.log(`Payment reminder sent to account ${accountId} (${account.name}) — $${total.toFixed(2)}`);
+    }
+
+    return { sent, count: sent.length };
+  }
 }
