@@ -19,6 +19,9 @@ async function main() {
   } finally {
     await app.close();
   }
+
+  // El contexto deja vivos los workers de colas; salimos explícitamente.
+  process.exit(0);
 }
 
 main().catch((err) => {
