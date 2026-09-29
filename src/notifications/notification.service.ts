@@ -371,7 +371,7 @@ export class NotificationService {
     const html = this.wrap(`
       <h2 style="color:#2563eb;margin-bottom:8px">Nuevo Registro — Periodo de Prueba</h2>
       <p style="color:#555;font-size:14px">
-        Se ha registrado una nueva cuenta en la plataforma con un periodo de prueba de <strong>5 días</strong>.
+        Se ha registrado una nueva cuenta en la plataforma con un periodo de prueba de <strong>15 días</strong>.
       </p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
         <tr>
@@ -396,13 +396,13 @@ export class NotificationService {
         </tr>
       </table>
       <p style="color:#555;font-size:13px">
-        Contacte al prospecto dentro de los próximos 5 días para completar la activación.
+        Contacte al prospecto dentro de los próximos 15 días para completar la activación.
       </p>
     `);
 
     await this.send(
       recipients,
-      `[NUEVO REGISTRO] ${data.accountName} (${data.accountRuc}) — Periodo de prueba 5 días`,
+      `[NUEVO REGISTRO] ${data.accountName} (${data.accountRuc}) — Periodo de prueba 15 días`,
       html,
     );
   }
@@ -745,5 +745,104 @@ export class NotificationService {
       `Pago pendiente — ${data.accountName} — $${data.total.toFixed(2)}`,
       html,
     );
+  }
+
+  /* ────────── Aviso de bloqueo por falta de pago (al cliente) ────────── */
+
+  async sendBlockWarning(data: {
+    accountName: string;
+    accountEmail: string;
+    companyEmails: Array<{ email: string | null; notificationEmail: string | null }>;
+    year: number;
+    month: number;
+    balance: number;
+    blockDate: string;
+    graceDays: number;
+  }): Promise<void> {
+    const monthNames = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
+      'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const period = `${monthNames[data.month]} ${data.year}`;
+    const fechaBloqueo = new Date(`${data.blockDate}T12:00:00`).toLocaleDateString('es-EC', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    });
+
+    const html = this.wrap(`
+      <h2 style="color:#dc2626;margin-bottom:8px">Su cuenta se bloqueará en ${data.graceDays} días</h2>
+      <p style="color:#555;font-size:14px">
+        La cuenta <strong>${this.escapeHtml(data.accountName)}</strong> tiene pendiente el pago del período
+        <strong>${period}</strong>, que venció ayer.
+      </p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
+        <tr>
+          <td style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;font-weight:600;width:45%">Período</td>
+          <td style="padding:8px 12px;border:1px solid #e9ecef">${period}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 12px;background:#fef2f2;border:1px solid #e9ecef;font-weight:600;color:#dc2626">Saldo pendiente</td>
+          <td style="padding:8px 12px;background:#fef2f2;border:1px solid #e9ecef;font-weight:600;color:#dc2626">$${data.balance.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;font-weight:600">Fecha de bloqueo</td>
+          <td style="padding:8px 12px;border:1px solid #e9ecef;color:#dc2626"><strong>${fechaBloqueo}</strong></td>
+        </tr>
+      </table>
+      <p style="color:#555;font-size:13px">
+        Si no recibimos el pago hasta esa fecha, la cuenta se bloqueará y dejará de emitir comprobantes.
+        Para coordinar el pago, responda a este correo o escríbanos por WhatsApp.
+        Si ya realizó el pago, ignore este mensaje.
+      </p>
+    `);
+
+    const recipients = this.collectAccountRecipients(data.accountEmail, data.companyEmails);
+    await this.send(
+      recipients,
+      `[IMPORTANTE] Su cuenta se bloqueará el ${fechaBloqueo} — ${data.accountName}`,
+      html,
+    );
+  }
+
+  /* ────────── Cuentas a bloquear (a administración) ────────── */
+
+  async sendAccountsToBlock(
+    recipients: string[],
+    accounts: Array<{ accountId: number; accountName: string; accountEmail: string; balance: number; daysLate: number }>,
+  ): Promise<void> {
+    const total = accounts.reduce((s, a) => s + a.balance, 0);
+
+    const rows = accounts
+      .map(
+        (a) => `
+        <tr>
+          <td style="padding:8px 12px;border:1px solid #e9ecef">
+            ${this.escapeHtml(a.accountName)}<br>
+            <span style="color:#888;font-size:11px">#${a.accountId} · ${this.escapeHtml(a.accountEmail)}</span>
+          </td>
+          <td style="padding:8px 12px;border:1px solid #e9ecef;text-align:center">${a.daysLate}</td>
+          <td style="padding:8px 12px;border:1px solid #e9ecef;text-align:right;font-weight:600">$${a.balance.toFixed(2)}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const html = this.wrap(`
+      <h2 style="color:#dc2626;margin-bottom:8px">Cuentas para bloquear</h2>
+      <p style="color:#555;font-size:14px">
+        Estas cuentas cumplieron el plazo de aviso y siguen sin pagar. Ya se les avisó hace 5 días.
+      </p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
+        <tr>
+          <th style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;text-align:left">Cuenta</th>
+          <th style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef">Días</th>
+          <th style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;text-align:right">Saldo</th>
+        </tr>
+        ${rows}
+        <tr>
+          <td style="padding:8px 12px;border:1px solid #e9ecef;font-weight:600" colspan="2">Total</td>
+          <td style="padding:8px 12px;border:1px solid #e9ecef;font-weight:600;text-align:right">$${total.toFixed(2)}</td>
+        </tr>
+      </table>
+      <p style="color:#888;font-size:12px">El bloqueo no es automático: hay que hacerlo desde el panel.</p>
+    `);
+
+    await this.send(recipients, `[BLOQUEAR] ${accounts.length} cuenta(s) sin pago — $${total.toFixed(2)}`, html);
   }
 }

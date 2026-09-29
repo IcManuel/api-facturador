@@ -45,8 +45,8 @@ export class ClientCompaniesController {
 
   @Get('plans/available')
   @ApiOperation({ summary: 'Planes disponibles para auto-asignar' })
-  getAvailablePlans() {
-    return this.companiesService.getAvailablePlans();
+  getAvailablePlans(@CurrentUser('accountId') accountId: number) {
+    return this.companiesService.getAvailablePlans(accountId);
   }
 
   @Get()

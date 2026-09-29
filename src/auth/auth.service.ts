@@ -19,6 +19,9 @@ import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
+  /** Días de demo para cuentas nuevas (desde el 30-sep-2026; antes eran 5). */
+  static readonly TRIAL_DAYS = 15;
+
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
@@ -252,7 +255,7 @@ export class AuthService {
     }
 
     // Create account with trial status
-    const trialEndsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    const trialEndsAt = new Date(Date.now() + AuthService.TRIAL_DAYS * 24 * 60 * 60 * 1000);
     const account = this.accountRepo.create({
       name: dto.accountName,
       ruc: dto.ruc,

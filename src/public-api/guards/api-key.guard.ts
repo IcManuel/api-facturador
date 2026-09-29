@@ -55,7 +55,7 @@ export class ApiKeyGuard implements CanActivate {
         new Date() > account.trialEndsAt
       ) {
         throw new UnauthorizedException(
-          'Su periodo de prueba de 5 días ha expirado. Contacte al equipo de AutorizadorEC para activar su cuenta.',
+          'Su periodo de prueba de 15 días ha expirado. Contacte al equipo de AutorizadorEC para activar su cuenta.',
         );
       }
     }

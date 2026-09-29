@@ -29,7 +29,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
-  @ApiOperation({ summary: 'Registro público de nueva cuenta (trial 5 días)' })
+  @ApiOperation({ summary: 'Registro público de nueva cuenta (trial 15 días)' })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }

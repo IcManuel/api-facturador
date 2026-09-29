@@ -83,69 +83,111 @@ export class NotificationCron {
     }
   }
 
+  /** Días de gracia entre el aviso al cliente y el aviso de bloqueo a administración. */
+  static readonly GRACE_DAYS = 5;
+
   /**
-   * Every day at 10:00 AM (ECT).
-   * Sends reminders for overdue billing periods.
+   * Todos los días a las 15:00 (hora del servidor, América/Guayaquil).
+   *
+   * Cobranza estricta:
+   *  - Un día después de la fecha de pago: se avisa al cliente que su cuenta
+   *    se bloqueará en 5 días.
+   *  - Cumplidos esos 5 días sin pago: se avisa a administración con la lista
+   *    de cuentas a bloquear. El bloqueo es manual, no automático.
    */
-  @Cron('0 15 * * *') // 10:00 AM ECT
+  @Cron('0 15 * * *')
   async handleOverduePayments(): Promise<void> {
     const acquired = await this.redisLock.acquire('notification-overdue', 300);
     if (!acquired) return;
 
     try {
-      const overduePeriods = await this.billingRepo.find({
+      const periods = await this.billingRepo.find({
         where: {
           status: In([BillingStatus.PENDING, BillingStatus.PARTIAL, BillingStatus.OVERDUE]),
         },
         relations: ['account', 'account.companies'],
       });
 
-      if (overduePeriods.length === 0) return;
+      const today = this.startOfDay(new Date());
+      const paraBloquear: Array<{
+        accountId: number; accountName: string; accountEmail: string;
+        balance: number; daysLate: number;
+      }> = [];
 
-      // Only notify for periods that are past their month
-      const now = new Date();
-      const currentYear = now.getFullYear();
-      const currentMonth = now.getMonth() + 1;
-
-      const pastDue = overduePeriods.filter((bp) => {
-        if (bp.year < currentYear) return true;
-        if (bp.year === currentYear && bp.month < currentMonth) return true;
-        return false;
-      });
-
-      if (pastDue.length === 0) return;
-
-      this.logger.log(`Found ${pastDue.length} overdue billing periods`);
-
-      for (const bp of pastDue) {
+      for (const bp of periods) {
         const account = bp.account;
-        if (!account || !account.isActive) continue;
-        if (account.isInternal) continue; // skip cuentas propias
+        if (!account || !account.isActive || account.isInternal) continue;
+        if (account.status === AccountStatus.BLOCKED) continue;
 
-        // Calculate days since the period ended
-        const periodEnd = new Date(bp.year, bp.month, 1); // first day of next month
-        const daysSinceDue = Math.floor((now.getTime() - periodEnd.getTime()) / 86_400_000);
+        const balance = Number(bp.total) - Number(bp.paidAmount ?? 0);
+        if (balance <= 0) continue;
+
+        const dueDate = this.dueDateOf(bp);
+        const daysLate = Math.round((today.getTime() - dueDate.getTime()) / 86_400_000);
+        const blockDate = new Date(dueDate);
+        blockDate.setDate(blockDate.getDate() + 1 + NotificationCron.GRACE_DAYS);
 
         const companyEmails = (account.companies ?? [])
           .filter((c) => c.isActive)
           .map((c) => ({ email: c.email, notificationEmail: c.notificationEmail }));
 
-        await this.notificationService.sendOverduePayment({
-          accountName: account.name,
-          accountEmail: account.email,
-          companyEmails,
-          year: bp.year,
-          month: bp.month,
-          total: Number(bp.total),
-          paidAmount: Number(bp.paidAmount),
-          daysSinceDue,
-        });
+        if (daysLate === 1) {
+          await this.notificationService.sendBlockWarning({
+            accountName: account.name,
+            accountEmail: account.email,
+            companyEmails,
+            year: bp.year,
+            month: bp.month,
+            balance,
+            blockDate: blockDate.toISOString().slice(0, 10),
+            graceDays: NotificationCron.GRACE_DAYS,
+          });
+          this.logger.log(`Aviso de bloqueo enviado a cuenta ${account.id} (${account.name}) — $${balance.toFixed(2)}`);
+        } else if (daysLate === 1 + NotificationCron.GRACE_DAYS) {
+          paraBloquear.push({
+            accountId: account.id,
+            accountName: account.name,
+            accountEmail: account.email,
+            balance,
+            daysLate,
+          });
+        }
+      }
+
+      if (paraBloquear.length > 0) {
+        await this.notificationService.sendAccountsToBlock(
+          this.blockAlertRecipients(),
+          paraBloquear,
+        );
+        this.logger.log(`Aviso a administración: ${paraBloquear.length} cuenta(s) para bloquear`);
       }
     } catch (err: any) {
       this.logger.error(`Overdue payments cron failed: ${err.message}`, err.stack);
     } finally {
       await this.redisLock.release('notification-overdue');
     }
+  }
+
+  /** Fecha en la que el período debía pagarse: el día de cierre del ciclo. */
+  private dueDateOf(bp: BillingPeriod): Date {
+    if (bp.periodEndDate) {
+      const d = new Date(`${bp.periodEndDate}T00:00:00`);
+      d.setDate(d.getDate() + 1);
+      return this.startOfDay(d);
+    }
+    // Períodos antiguos sin fechas de ciclo: vencen el primer día del mes siguiente.
+    return this.startOfDay(new Date(bp.year, bp.month, 1));
+  }
+
+  private startOfDay(d: Date): Date {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  private blockAlertRecipients(): string[] {
+    return (process.env.COLLECTIONS_REPORT_TO || 'salazarmanuel6@gmail.com')
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
   }
 
   /**

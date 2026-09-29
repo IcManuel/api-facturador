@@ -111,10 +111,11 @@ export class BillingService {
         overageDocs = 0;
         overageTotal = 0;
       } else if (planTier === PlanTier.PAYPERUSE) {
-        // Pay per doc — no base price, all docs charged at overage rate
-        overageDocs = docsTotal;
-        overageTotal = docsTotal * overageUnitPrice;
-        companyTotal = overageTotal;
+        // Pago por uso: cuota base del plan (puede ser 0 en los planes
+        // antiguos) más cada comprobante autorizado.
+        overageDocs = Number(row.docsAuthorized ?? 0);
+        overageTotal = overageDocs * overageUnitPrice;
+        companyTotal = planPrice + overageTotal;
       } else {
         // Fixed plans (basic, professional, enterprise, custom)
         overageDocs = row.overageEnabled ? Number(row.overageDocs) : 0;
@@ -237,8 +238,10 @@ export class BillingService {
         if (tier === PlanTier.UNLIMITED) {
           // No charge
         } else if (tier === PlanTier.PAYPERUSE) {
-          totalOverageDocs += docsTotal;
-          totalOverageAmount += docsTotal * overagePrice;
+          const authorized = Number(c.docsAuthorized);
+          totalBase += planPrice;
+          totalOverageDocs += authorized;
+          totalOverageAmount += authorized * overagePrice;
           representativeOveragePrice = overagePrice;
         } else {
           totalBase += planPrice;
@@ -542,6 +545,7 @@ export class BillingService {
           // no charge
         } else if (tier === PlanTier.PAYPERUSE) {
           const authorized = Number(c.docsAuthorized);
+          totalBase += planPrice;
           totalOverageDocs += authorized;
           totalOverageAmount += authorized * overagePrice;
           representativeOveragePrice = overagePrice;
@@ -674,6 +678,7 @@ export class BillingService {
       if (r.planTier === PlanTier.UNLIMITED) {
         // sin cargo
       } else if (r.planTier === PlanTier.PAYPERUSE) {
+        base = planPrice;
         overageDocs = docsAuthorized;
       } else {
         base = planPrice;

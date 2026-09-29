@@ -57,7 +57,7 @@ export class AccountStatusGuard implements CanActivate {
         new Date() > account.trialEndsAt
       ) {
         throw new ForbiddenException(
-          'Su periodo de prueba de 5 días ha expirado. Contacte al equipo de AutorizadorEC para activar su cuenta.',
+          'Su periodo de prueba de 15 días ha expirado. Contacte al equipo de AutorizadorEC para activar su cuenta.',
         );
       }
 

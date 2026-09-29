@@ -25,6 +25,8 @@ import { UpdateEmissionPointDto } from '../../admin/companies/dto/update-emissio
 import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 import { SriDocTypeCode } from '../../entities/enums';
 
+const restrictedPlanTiers: PlanTier[] = [PlanTier.UNLIMITED, PlanTier.CUSTOM];
+
 @Injectable()
 export class ClientCompaniesService {
   constructor(
@@ -71,14 +73,34 @@ export class ClientCompaniesService {
     return company;
   }
 
-  async getAvailablePlans(): Promise<SubscriptionPlan[]> {
-    return this.planRepo.find({
+  async getAvailablePlans(accountId?: number): Promise<SubscriptionPlan[]> {
+    const active = await this.planRepo.find({
       where: {
         isActive: true,
         tier: Not(In([PlanTier.UNLIMITED, PlanTier.CUSTOM])),
       },
       order: { monthlyPrice: 'ASC' },
     });
+
+    if (!accountId) return active;
+
+    // Planes retirados que esta cuenta ya usa: los sigue viendo y puede
+    // asignarlos a empresas nuevas, con las condiciones que ya tenía.
+    const ownPlanIds: Array<{ planId: number }> = await this.companyRepo
+      .createQueryBuilder('c')
+      .select('DISTINCT c.planId', 'planId')
+      .where('c.accountId = :accountId', { accountId })
+      .getRawMany();
+
+    const missing = ownPlanIds
+      .map((r) => Number(r.planId))
+      .filter((id) => !active.some((p) => p.id === id));
+
+    if (missing.length === 0) return active;
+
+    const legacy = await this.planRepo.find({ where: { id: In(missing) } });
+    return [...active, ...legacy.filter((p) => !restrictedPlanTiers.includes(p.tier))]
+      .sort((a, b) => Number(a.monthlyPrice) - Number(b.monthlyPrice));
   }
 
   async create(accountId: number, dto: CreateClientCompanyDto): Promise<Company> {
@@ -105,7 +127,14 @@ export class ClientCompaniesService {
       );
     }
     if (!plan.isActive) {
-      throw new BadRequestException('El plan seleccionado no está disponible');
+      // Un plan retirado sigue disponible para las cuentas que ya lo tienen en
+      // alguna empresa: conservan las condiciones con las que se registraron.
+      const grandfathered = await this.companyRepo.count({
+        where: { accountId, planId: plan.id },
+      });
+      if (!grandfathered) {
+        throw new BadRequestException('El plan seleccionado no está disponible');
+      }
     }
 
     // El RUC es único por cuenta, no globalmente: la misma empresa puede
