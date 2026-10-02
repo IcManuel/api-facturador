@@ -22,6 +22,7 @@ import { classifySriMessages, SriErrorAction } from '../sri/sri-errors';
 import { EventsGateway } from '../../events/events.gateway';
 import { NotificationService } from '../../notifications/notification.service';
 import { withRucProveedor, injectRucProveedorIntoRawXml } from '../xml/ruc-proveedor.util';
+import { resolverTarifa } from '../../common/utils/tarifa.util';
 
 export interface ProcessingResult {
   status: 'authorized' | 'rejected' | 'failed' | 'processing';
@@ -1099,7 +1100,13 @@ export class DocumentProcessingService {
           codigo: t.codigo,
           codigoPorcentaje: t.codigoPorcentaje,
           baseImponible: Number(t.baseImponible),
-          tarifa: Number(t.tarifa ?? t.valor > 0 ? ((t.valor / t.baseImponible) * 100) : 0),
+          tarifa: resolverTarifa({
+            codigo: t.codigo,
+            codigoPorcentaje: t.codigoPorcentaje,
+            baseImponible: Number(t.baseImponible),
+            valor: Number(t.valor),
+            tarifa: t.tarifa,
+          }),
           valor: Number(t.valor),
         })),
         valorTotal: Number(payload.valorTotal),

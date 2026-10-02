@@ -128,6 +128,16 @@ export class TotalImpuestoDto {
   @Min(0)
   baseImponible: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Tarifa del impuesto (ej: 15 para IVA 15%). Opcional: si no se envía, se toma del catálogo del SRI según codigoPorcentaje.',
+    example: 15,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  tarifa?: number;
+
   @ApiProperty({ description: 'Valor del impuesto. Max 14 dígitos' })
   @IsNumber()
   @Min(0)
