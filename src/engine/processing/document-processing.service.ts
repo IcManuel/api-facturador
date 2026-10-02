@@ -517,6 +517,22 @@ export class DocumentProcessingService {
    * Solo avisa resultados finales: si sigue 'processing' el documento no cambió
    * de estado (ya estaba RECEIVED) y repetir el aviso en cada consulta sería ruido.
    */
+
+  /**
+   * Indica si el comprobante llego a enviarse al SRI (paso "sent_sri" completado).
+   * Solo en ese caso tiene sentido volver a consultar su autorizacion.
+   */
+  async wasSentToSri(documentId: number): Promise<boolean> {
+    const sent = await this.timelineRepo.findOne({
+      where: {
+        documentId,
+        step: 'sent_sri',
+        status: TimelineStepStatus.COMPLETED,
+      },
+    });
+    return !!sent;
+  }
+
   async retryAuthorization(documentId: number): Promise<ProcessingResult> {
     const result = await this.runAuthorizationCheck(documentId);
     if (result.status !== 'processing') {
@@ -537,8 +553,17 @@ export class DocumentProcessingService {
       throw new Error(`Document ${documentId} not found`);
     }
 
-    if (doc.status !== DocStatus.RECEIVED) {
-      throw new Error(`Document ${documentId} is in state ${doc.status}, expected RECEIVED`);
+    // Se permite reconsultar tambien los FAILED que ya llegaron al SRI: si el SRI
+    // no respondio a tiempo, el comprobante puede estar autorizado alla y aqui
+    // haber quedado como fallido.
+    const puedeReconsultar =
+      doc.status === DocStatus.RECEIVED ||
+      (doc.status === DocStatus.FAILED && (await this.wasSentToSri(documentId)));
+
+    if (!puedeReconsultar) {
+      throw new Error(
+        `Document ${documentId} is in state ${doc.status} and was never sent to the SRI`,
+      );
     }
 
     try {

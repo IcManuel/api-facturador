@@ -33,6 +33,12 @@ export class StaleDocumentCron {
 
   /** A system-retry whose scheduled time passed by more than this is considered "lost" */
   private readonly RETRY_GRACE_MIN = 10;
+
+  /** Minutos tras los que se reconsulta un FAILED que ya llegó al SRI. */
+  private readonly FAILED_RECHECK_MIN = 15;
+
+  /** No se reconsultan comprobantes fallidos más viejos que esto. */
+  private readonly FAILED_RECHECK_MAX_DAYS = 7;
   /** SRI-incident threshold: this many docs with system errors within the window triggers an alert */
   private readonly INCIDENT_THRESHOLD = 8;
   private readonly INCIDENT_WINDOW_MIN = 60;
@@ -65,6 +71,7 @@ export class StaleDocumentCron {
         this.resolveStuckReceived(),
         this.cleanupStuckCreated(),
         this.rescueLostSystemRetries(),
+        this.recheckFailedSentToSri(),
         this.detectSriIncident(),
       ]);
     } finally {
@@ -213,6 +220,46 @@ export class StaleDocumentCron {
    * Documents stuck in RECEIVED: SRI accepted but never authorized.
    * Try one final auth check. If authorized → update. Otherwise → FAILED.
    */
+  /**
+   * Comprobantes que quedaron en FAILED pero que SÍ llegaron al SRI (típicamente
+   * porque el SRI no respondió la autorización a tiempo). El SRI puede haberlos
+   * autorizado igual, así que se vuelve a consultar su estado: si están
+   * autorizados, el documento se completa solo.
+   */
+  private async recheckFailedSentToSri(): Promise<void> {
+    const desde = new Date(Date.now() - this.FAILED_RECHECK_MAX_DAYS * 24 * 60 * 60_000);
+    const hasta = new Date(Date.now() - this.FAILED_RECHECK_MIN * 60_000);
+
+    const candidatos: Array<{ doc_id: number }> = await this.docRepo.query(
+      `SELECT DISTINCT d.doc_id
+       FROM app.document d
+       JOIN app.document_timeline t ON t.doc_id = d.doc_id
+            AND t.dtl_step = 'sent_sri' AND t.dtl_status = 'completed'
+       WHERE d.doc_status = 'FAILED'
+         AND d.doc_updated_at BETWEEN $1 AND $2
+       ORDER BY d.doc_id DESC
+       LIMIT 50`,
+      [desde, hasta],
+    );
+
+    if (candidatos.length === 0) return;
+
+    this.logger.warn(
+      `Reconsultando ${candidatos.length} comprobante(s) FAILED que ya habían llegado al SRI`,
+    );
+
+    for (const { doc_id } of candidatos) {
+      try {
+        const result = await this.processingService.retryAuthorization(doc_id);
+        if (result.status === 'authorized') {
+          this.logger.log(`Document ${doc_id}: estaba autorizado en el SRI — recuperado desde FAILED`);
+        }
+      } catch (err: any) {
+        this.logger.debug(`Document ${doc_id}: reconsulta fallida — ${err.message}`);
+      }
+    }
+  }
+
   private async resolveStuckReceived(): Promise<void> {
     const cutoff = new Date(Date.now() - this.RECEIVED_TIMEOUT_MIN * 60_000);
 

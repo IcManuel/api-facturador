@@ -324,10 +324,16 @@ export class PublicDocumentsService {
   async retryAuthorization(companyId: number, accessKey: string) {
     const doc = await this.findByAccessKey(companyId, accessKey);
 
-    if (doc.status !== DocStatus.RECEIVED) {
+    // RECEIVED siempre; FAILED solo si el comprobante alcanzó a enviarse al SRI
+    // (puede estar autorizado allá aunque aquí figure como fallido).
+    const puedeReconsultar =
+      doc.status === DocStatus.RECEIVED ||
+      (doc.status === DocStatus.FAILED && (await this.processingService.wasSentToSri(doc.id)));
+
+    if (!puedeReconsultar) {
       throw new ConflictException(
-        `Solo se puede reintentar autorización para documentos en estado RECEIVED. ` +
-        `Estado actual: ${doc.status}.`,
+        `Solo se puede reconsultar la autorización de documentos en estado RECEIVED, ` +
+        `o FAILED que ya fueron enviados al SRI. Estado actual: ${doc.status}.`,
       );
     }
 
