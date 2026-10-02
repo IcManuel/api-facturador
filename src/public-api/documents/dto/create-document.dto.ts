@@ -523,6 +523,17 @@ export class CreateDocumentDto {
   })
   fechaEmision: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Establecimiento emisor (3 dígitos). Si no se envía, se usa el establecimiento principal de la empresa, ' +
+      'que es el comportamiento por defecto. Cada establecimiento lleva su propia numeración.',
+    example: '002',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{3}$/, { message: 'establecimiento debe ser numérico de 3 dígitos (ej: "002")' })
+  establecimiento?: string;
+
   @ApiPropertyOptional({ description: 'Punto de emisión (default: primer punto configurado)', example: '001' })
   @IsOptional()
   @IsString()

@@ -16,4 +16,13 @@ export class CreateEmissionPointDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @ApiPropertyOptional({
+    description: 'Establecimiento al que pertenece (3 dígitos). Si no se envía, el principal de la empresa.',
+    example: '002',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  establecimiento?: string;
 }

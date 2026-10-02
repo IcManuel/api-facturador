@@ -10,9 +10,11 @@ import { EngineModule } from '../../engine/engine.module';
 import { ClientSmtpModule } from '../../client/smtp/smtp.module';
 import { CompaniesController } from './companies.controller';
 import { CompaniesService } from './companies.service';
+import { EstablishmentsModule } from '../../establishments/establishments.module';
 
 @Module({
   imports: [
+    EstablishmentsModule,
     TypeOrmModule.forFeature([Company, EmissionPoint, CompanyDocType, CompanySeries, CompanySmtp]),
     EngineModule,
     ClientSmtpModule,

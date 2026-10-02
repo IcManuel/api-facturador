@@ -24,6 +24,7 @@ import { CreateDocumentDto } from './dto/create-document.dto';
 import { DOCUMENT_QUEUE } from '../../queues/queues.constants';
 import { formatDateTz } from '../../common/utils/date.util';
 import { NotificationService } from '../../notifications/notification.service';
+import { EstablishmentsService } from '../../establishments/establishments.service';
 
 /** States where a document can be corrected and reprocessed */
 const CORRECTABLE_STATES: DocStatus[] = [DocStatus.CREATED, DocStatus.REJECTED, DocStatus.FAILED];
@@ -53,6 +54,7 @@ export class PublicDocumentsService {
     private readonly accessKeyService: AccessKeyService,
     private readonly processingService: DocumentProcessingService,
     private readonly s3Service: S3StorageService,
+    private readonly establishmentsService: EstablishmentsService,
     private readonly notificationService: NotificationService,
   ) {}
 
@@ -433,8 +435,15 @@ export class PublicDocumentsService {
     this.checkAccountActive(company);
     await this.checkDocTypeEnabled(company.id, docType);
 
+    // Establecimiento: el que indique el documento o, si no viene, el principal
+    // de la empresa (comportamiento de todas las integraciones existentes).
+    const establishmentRow = await this.establishmentsService.resolveForEmission(
+      company,
+      dto.establecimiento,
+    );
+    const establishment = establishmentRow.code;
     const emissionPoint = dto.puntoEmision ?? '001';
-    await this.checkEmissionPoint(company.id, emissionPoint);
+    await this.checkEmissionPoint(company.id, establishmentRow.id, establishment, emissionPoint);
 
     if (dto.idempotencyKey) {
       const existing = await this.docRepo.findOne({
@@ -497,13 +506,13 @@ export class PublicDocumentsService {
         );
       }
       sequential = dto.secuencial.padStart(9, '0');
-      fullSequential = `${company.establishment}-${emissionPoint}-${sequential}`;
+      fullSequential = `${establishment}-${emissionPoint}-${sequential}`;
 
       const sequentialTaken = await this.docRepo.findOne({
         where: {
           companyId: company.id,
           typeCode: docType,
-          establishment: company.establishment,
+          establishment,
           emissionPoint,
           sequential: fullSequential,
         },
@@ -527,7 +536,7 @@ export class PublicDocumentsService {
         );
       }
       ({ sequential, fullSequential } = await this.sequentialService.nextSequential(
-        company.id, docType, company.establishment, emissionPoint,
+        company.id, docType, establishment, emissionPoint,
       ));
     }
     // For guía de remisión (06), the SRI validates the claveAcceso date against
@@ -557,7 +566,7 @@ export class PublicDocumentsService {
       }
       accessKey = this.accessKeyService.generate({
         issueDate, docType, ruc: company.ruc, env: company.env,
-        establishment: company.establishment, emissionPoint, sequential,
+        establishment, emissionPoint, sequential,
       });
     }
 
@@ -600,7 +609,7 @@ export class PublicDocumentsService {
     doc.buyerName = dto.razonSocialComprador;
     doc.buyerIdType = dto.tipoIdentificacionComprador;
     doc.buyerId = dto.identificacionComprador;
-    doc.establishment = company.establishment;
+    doc.establishment = establishment;
     doc.emissionPoint = emissionPoint;
     doc.contentHash = contentHash as any;
     doc.idempotencyKey = dto.idempotencyKey as any;
@@ -904,20 +913,25 @@ export class PublicDocumentsService {
     }
   }
 
-  private async checkEmissionPoint(companyId: number, code: string) {
+  private async checkEmissionPoint(
+    companyId: number,
+    establishmentId: number,
+    establishmentCode: string,
+    code: string,
+  ) {
     const ep = await this.emissionPointRepo.findOne({
-      where: { companyId, code },
+      where: { companyId, establishmentId, code },
     });
 
     if (!ep) {
       throw new BadRequestException(
-        `El punto de emisión "${code}" no existe para esta empresa. Verifique la configuración.`,
+        `El punto de emisión "${code}" no existe en el establecimiento "${establishmentCode}". Verifique la configuración.`,
       );
     }
 
     if (!ep.isActive) {
       throw new BadRequestException(
-        `El punto de emisión "${code}" está desactivado. Contacte al administrador.`,
+        `El punto de emisión "${code}" del establecimiento "${establishmentCode}" está desactivado. Contacte al administrador.`,
       );
     }
   }

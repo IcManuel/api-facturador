@@ -23,6 +23,7 @@ import { EventsGateway } from '../../events/events.gateway';
 import { NotificationService } from '../../notifications/notification.service';
 import { withRucProveedor, injectRucProveedorIntoRawXml } from '../xml/ruc-proveedor.util';
 import { resolverTarifa } from '../../common/utils/tarifa.util';
+import { Establishment } from '../../entities/establishment.entity';
 
 export interface ProcessingResult {
   status: 'authorized' | 'rejected' | 'failed' | 'processing';
@@ -59,6 +60,8 @@ export class DocumentProcessingService {
     private readonly sriService: SriService,
     private readonly accessKeyService: AccessKeyService,
     private readonly s3Service: S3StorageService,
+    @InjectRepository(Establishment)
+    private readonly establishmentRepo: Repository<Establishment>,
     private readonly rideService: RideService,
     private readonly cryptoService: CryptoService,
     private readonly mailService: MailService,
@@ -163,6 +166,7 @@ export class DocumentProcessingService {
         const xmlStartTime = Date.now();
         await this.addTimeline(documentId, 'xml_generated', TimelineStepStatus.CURRENT,
           stepOrder++, 'Generando XML');
+        (doc as any).__establishmentAddress = await this.resolveEstablishmentAddress(doc);
         const xmlData = this.buildXmlData(doc);
         xml = this.xmlService.generate(doc.typeCode, xmlData);
         await this.updateLastTimeline(documentId, TimelineStepStatus.COMPLETED,
@@ -804,6 +808,7 @@ export class DocumentProcessingService {
           logoBuffer = await this.s3Service.download(doc.company.logoS3Key);
         } catch { /* logo not critical */ }
       }
+      (doc as any).__establishmentAddress = await this.resolveEstablishmentAddress(doc);
       const rideData = this.buildRideData(doc, authResult, logoBuffer);
       pdfBuffer = await this.rideService.generate(rideData);
       const pdfUpload = await this.s3Service.uploadPdf(
@@ -934,6 +939,21 @@ export class DocumentProcessingService {
    * Build the complete data object for XML generation.
    * Merges company info (infoTributaria) + document metadata + client payload.
    */
+  /**
+   * Dirección de la sucursal desde la que se emitió el comprobante. Si la
+   * empresa no tiene sucursales cargadas, cae a la dirección de la empresa.
+   */
+  private async resolveEstablishmentAddress(doc: Document): Promise<string | undefined> {
+    try {
+      const est = await this.establishmentRepo.findOne({
+        where: { companyId: doc.companyId, code: doc.establishment },
+      });
+      return est?.address ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private buildXmlData(doc: Document): any {
     const company = doc.company;
     const payload = doc.payload;
@@ -952,7 +972,8 @@ export class DocumentProcessingService {
       contribuyenteRimpe: payload.contribuyenteRimpe || undefined,
       agenteRetencion: payload.agenteRetencion || undefined,
       fechaEmision: payload.fechaEmision,
-      dirEstablecimiento: payload.dirEstablecimiento || company.address || undefined,
+      dirEstablecimiento:
+        payload.dirEstablecimiento || (doc as any).__establishmentAddress || company.address || undefined,
       contribuyenteEspecial: payload.contribuyenteEspecial || undefined,
       obligadoContabilidad: payload.obligadoContabilidad || 'NO',
       infoAdicional: withRucProveedor(payload.infoAdicional),
@@ -1340,7 +1361,8 @@ export class DocumentProcessingService {
       nombreComercial: company.tradeName || undefined,
       ruc: company.ruc,
       dirMatriz: company.address || '',
-      dirEstablecimiento: payload.dirEstablecimiento || company.address || '',
+      dirEstablecimiento:
+        payload.dirEstablecimiento || (doc as any).__establishmentAddress || company.address || '',
       obligadoContabilidad: payload.obligadoContabilidad || 'NO',
       contribuyenteRimpe: payload.contribuyenteRimpe || undefined,
       contribuyenteEspecial: payload.contribuyenteEspecial || undefined,

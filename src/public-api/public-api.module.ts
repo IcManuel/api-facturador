@@ -20,9 +20,11 @@ import { XmlDocumentsController } from './documents/xml-documents.controller';
 import { XmlDocumentsService } from './documents/xml-documents.service';
 import { InfoController } from './info/info.controller';
 import { InfoService } from './info/info.service';
+import { EstablishmentsModule } from '../establishments/establishments.module';
 
 @Module({
   imports: [
+    EstablishmentsModule,
     TypeOrmModule.forFeature([Company, Document, DocumentTimeline, DocumentError, DocumentFile, Certificate, EmissionPoint, CompanyDocType, CompanySeries, Account]),
     EngineModule,
     QueuesModule,

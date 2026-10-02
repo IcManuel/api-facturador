@@ -18,9 +18,11 @@ import { Company } from '../entities/company.entity';
 import { EmissionPoint } from '../entities/emission-point.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { EstablishmentsModule } from '../establishments/establishments.module';
 
 @Module({
   imports: [
+    EstablishmentsModule,
     ConfigModule,
     TypeOrmModule.forFeature([PlatformAdmin, AccountUser, Account, Company, EmissionPoint, SubscriptionPlan]),
     NotificationsModule,

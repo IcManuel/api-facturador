@@ -7,6 +7,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Company } from './company.entity';
+import { Establishment } from './establishment.entity';
 
 @Entity({ schema: 'app', name: 'emission_point' })
 export class EmissionPoint {
@@ -15,6 +16,9 @@ export class EmissionPoint {
 
   @Column({ name: 'com_id' })
   companyId: number;
+
+  @Column({ name: 'est_id' })
+  establishmentId: number;
 
   @Column({ name: 'emp_code', length: 3 })
   code: string;
@@ -31,4 +35,8 @@ export class EmissionPoint {
   @ManyToOne(() => Company, (c) => c.emissionPoints, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'com_id' })
   company: Company;
+
+  @ManyToOne(() => Establishment, (e) => e.emissionPoints, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'est_id' })
+  establishment: Establishment;
 }

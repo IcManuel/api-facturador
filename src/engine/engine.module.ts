@@ -22,12 +22,14 @@ import { DocumentError } from '../entities/document-error.entity';
 import { DocumentFile } from '../entities/document-file.entity';
 import { Certificate } from '../entities/certificate.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { Establishment } from '../entities/establishment.entity';
 
 @Module({
   imports: [
     ConfigModule,
     ScheduleModule.forRoot(),
-    TypeOrmModule.forFeature([Document, DocumentTimeline, DocumentError, DocumentFile, Certificate]),
+    TypeOrmModule.forFeature([
+      Establishment,Document, DocumentTimeline, DocumentError, DocumentFile, Certificate]),
     NotificationsModule,
   ],
   providers: [

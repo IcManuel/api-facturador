@@ -16,6 +16,7 @@ import { MailService } from '../common/services/mail.service';
 import { NotificationService } from '../notifications/notification.service';
 import { RefreshTokenService } from './refresh-token.service';
 import { RegisterDto } from './dto/register.dto';
+import { EstablishmentsService } from '../establishments/establishments.service';
 
 @Injectable()
 export class AuthService {
@@ -42,6 +43,7 @@ export class AuthService {
     private readonly mailService: MailService,
     private readonly notificationService: NotificationService,
     private readonly refreshTokenService: RefreshTokenService,
+    private readonly establishmentsService: EstablishmentsService,
   ) {}
 
   async loginAdmin(email: string, password: string) {
@@ -295,9 +297,14 @@ export class AuthService {
       billingStartDate: new Date().toISOString().slice(0, 10),
     });
     await this.companyRepo.save(company);
+    const establishment = await this.establishmentsService.ensureExists(
+      company.id,
+      company.establishment,
+    );
     await this.emissionPointRepo.save(
       this.emissionPointRepo.create({
         companyId: company.id,
+        establishmentId: establishment.id,
         code: '001',
         description: 'Punto de emisión principal',
       }),

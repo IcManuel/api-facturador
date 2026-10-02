@@ -19,6 +19,7 @@ import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 import { UpdateCompanyInfoDto } from './dto/update-company-info.dto';
 import { UpdateCompanyRucDto } from './dto/update-company-ruc.dto';
 import { imageFileFilter, resolveImageMime } from '../../common/utils/image-upload.util';
+import { CreateEstablishmentDto, UpdateEstablishmentDto } from '../../establishments/dto/establishment.dto';
 
 @ApiTags('API Pública - Empresa')
 @ApiSecurity('api-key')
@@ -177,6 +178,50 @@ export class InfoController {
   @ApiOperation({ summary: 'Eliminar el logo de la empresa' })
   deleteLogo(@CurrentCompany() company: Company) {
     return this.service.deleteLogo(company);
+  }
+
+  // ── Establecimientos ──
+
+  @Get('establishments')
+  @ApiOperation({ summary: 'Listar establecimientos de la empresa' })
+  listEstablishments(@CurrentCompany('id') companyId: number) {
+    return this.service.listEstablishments(companyId);
+  }
+
+  @Post('establishments')
+  @ApiOperation({
+    summary: 'Crear un establecimiento (sucursal)',
+    description:
+      'Crea una sucursal con su propio código y su punto de emisión 001. La numeración de cada ' +
+      'establecimiento es independiente y arranca en 1. Para emitir desde ella, envíe ' +
+      '"establecimiento" en POST /documents.',
+  })
+  createEstablishment(
+    @CurrentCompany('id') companyId: number,
+    @Body() dto: CreateEstablishmentDto,
+  ) {
+    return this.service.createEstablishment(companyId, dto);
+  }
+
+  @Patch('establishments/:estId')
+  @ApiOperation({ summary: 'Actualizar un establecimiento' })
+  @ApiParam({ name: 'estId', type: Number })
+  updateEstablishment(
+    @CurrentCompany('id') companyId: number,
+    @Param('estId', ParseIntPipe) estId: number,
+    @Body() dto: UpdateEstablishmentDto,
+  ) {
+    return this.service.updateEstablishment(companyId, estId, dto);
+  }
+
+  @Delete('establishments/:estId')
+  @ApiOperation({ summary: 'Eliminar un establecimiento sin comprobantes emitidos' })
+  @ApiParam({ name: 'estId', type: Number })
+  deleteEstablishment(
+    @CurrentCompany('id') companyId: number,
+    @Param('estId', ParseIntPipe) estId: number,
+  ) {
+    return this.service.deleteEstablishment(companyId, estId);
   }
 
   // ── Emission points ──

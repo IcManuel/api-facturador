@@ -33,6 +33,7 @@ import { UpdateEmissionPointDto } from '../../admin/companies/dto/update-emissio
 import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { imageFileFilter, resolveImageMime } from '../../common/utils/image-upload.util';
+import { CreateEstablishmentDto, UpdateEstablishmentDto } from '../../establishments/dto/establishment.dto';
 
 @ApiTags('Client - Companies')
 @ApiBearerAuth()
@@ -195,6 +196,51 @@ export class ClientCompaniesController {
   }
 
   // ── Emission Points ──
+
+  @Get(':id/establishments')
+  @ApiOperation({ summary: 'Listar establecimientos de la empresa' })
+  listEstablishments(
+    @CurrentUser('accountId') accountId: number,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.companiesService.listEstablishments(accountId, id);
+  }
+
+  @Post(':id/establishments')
+  @ApiOperation({
+    summary: 'Crear un establecimiento (sucursal)',
+    description:
+      'Crea una sucursal con su propio código. Se le crea automáticamente el punto de emisión 001. ' +
+      'La numeración de cada establecimiento es independiente y arranca en 1.',
+  })
+  createEstablishment(
+    @CurrentUser('accountId') accountId: number,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateEstablishmentDto,
+  ) {
+    return this.companiesService.createEstablishment(accountId, id, dto);
+  }
+
+  @Patch(':id/establishments/:estId')
+  @ApiOperation({ summary: 'Actualizar un establecimiento' })
+  updateEstablishment(
+    @CurrentUser('accountId') accountId: number,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('estId', ParseIntPipe) estId: number,
+    @Body() dto: UpdateEstablishmentDto,
+  ) {
+    return this.companiesService.updateEstablishment(accountId, id, estId, dto);
+  }
+
+  @Delete(':id/establishments/:estId')
+  @ApiOperation({ summary: 'Eliminar un establecimiento sin comprobantes emitidos' })
+  deleteEstablishment(
+    @CurrentUser('accountId') accountId: number,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('estId', ParseIntPipe) estId: number,
+  ) {
+    return this.companiesService.deleteEstablishment(accountId, id, estId);
+  }
 
   @Post(':id/emission-points')
   @ApiOperation({ summary: 'Agregar punto de emisión' })

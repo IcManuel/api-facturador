@@ -24,6 +24,8 @@ import { CreateEmissionPointDto } from '../../admin/companies/dto/create-emissio
 import { UpdateEmissionPointDto } from '../../admin/companies/dto/update-emission-point.dto';
 import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 import { SriDocTypeCode } from '../../entities/enums';
+import { EstablishmentsService } from '../../establishments/establishments.service';
+import { CreateEstablishmentDto, UpdateEstablishmentDto } from '../../establishments/dto/establishment.dto';
 
 const restrictedPlanTiers: PlanTier[] = [PlanTier.UNLIMITED, PlanTier.CUSTOM];
 
@@ -45,6 +47,7 @@ export class ClientCompaniesService {
     @InjectRepository(Document)
     private readonly documentRepo: Repository<Document>,
     private readonly dataSource: DataSource,
+    private readonly establishmentsService: EstablishmentsService,
     private readonly s3Service: S3StorageService,
     private readonly certificatesService: CertificatesService,
   ) {}
@@ -153,7 +156,10 @@ export class ClientCompaniesService {
       billingStartDate: dto.billingStartDate ?? new Date().toISOString().slice(0, 10),
     });
 
-    return this.companyRepo.save(company);
+    const created = await this.companyRepo.save(company);
+    // Establecimiento principal, para que aparezca en GET /establishments
+    await this.establishmentsService.ensureExists(created.id, created.establishment);
+    return created;
   }
 
   async update(
@@ -163,7 +169,12 @@ export class ClientCompaniesService {
   ) {
     const company = await this.findOne(accountId, companyId);
     Object.assign(company, dto);
-    return this.companyRepo.save(company);
+    const saved = await this.companyRepo.save(company);
+    if (dto.establishment !== undefined) {
+      // El establecimiento principal siempre tiene que existir como sucursal.
+      await this.establishmentsService.ensureExists(saved.id, saved.establishment);
+    }
+    return saved;
   }
 
   /**
@@ -293,6 +304,28 @@ export class ClientCompaniesService {
     return this.certificatesService.upload(company.id, fileBuffer, fileName, password, uploadedBy);
   }
 
+  // ── Establecimientos ──
+
+  async listEstablishments(accountId: number, companyId: number) {
+    const company = await this.findOne(accountId, companyId);
+    return this.establishmentsService.findAll(company.id);
+  }
+
+  async createEstablishment(accountId: number, companyId: number, dto: CreateEstablishmentDto) {
+    const company = await this.findOne(accountId, companyId);
+    return this.establishmentsService.create(company.id, dto);
+  }
+
+  async updateEstablishment(accountId: number, companyId: number, estId: number, dto: UpdateEstablishmentDto) {
+    const company = await this.findOne(accountId, companyId);
+    return this.establishmentsService.update(company.id, estId, dto);
+  }
+
+  async deleteEstablishment(accountId: number, companyId: number, estId: number) {
+    const company = await this.findOne(accountId, companyId);
+    return this.establishmentsService.remove(company.id, estId);
+  }
+
   // ── Emission Points ──
 
   async addEmissionPoint(
@@ -302,14 +335,26 @@ export class ClientCompaniesService {
   ): Promise<EmissionPoint> {
     const company = await this.findOne(accountId, companyId);
 
+    const establishment = await this.establishmentsService.ensureExists(
+      company.id,
+      dto.establecimiento ?? company.establishment,
+    );
+
     const exists = await this.emissionPointRepo.findOne({
-      where: { companyId: company.id, code: dto.code },
+      where: { establishmentId: establishment.id, code: dto.code },
     });
     if (exists) {
-      throw new ConflictException(`Ya existe un punto de emisión con código ${dto.code}`);
+      throw new ConflictException(
+        `Ya existe un punto de emisión con código ${dto.code} en el establecimiento ${establishment.code}`,
+      );
     }
 
-    const ep = this.emissionPointRepo.create({ ...dto, companyId: company.id });
+    const { establecimiento, ...rest } = dto;
+    const ep = this.emissionPointRepo.create({
+      ...rest,
+      companyId: company.id,
+      establishmentId: establishment.id,
+    });
     return this.emissionPointRepo.save(ep);
   }
 

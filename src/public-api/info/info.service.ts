@@ -16,6 +16,8 @@ import { UpdateCompanyInfoDto } from './dto/update-company-info.dto';
 import { CreateEmissionPointDto } from '../../admin/companies/dto/create-emission-point.dto';
 import { UpdateEmissionPointDto } from '../../admin/companies/dto/update-emission-point.dto';
 import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
+import { EstablishmentsService } from '../../establishments/establishments.service';
+import { CreateEstablishmentDto, UpdateEstablishmentDto } from '../../establishments/dto/establishment.dto';
 
 @Injectable()
 export class InfoService {
@@ -34,6 +36,7 @@ export class InfoService {
     private readonly accountRepo: Repository<Account>,
     private readonly certificatesService: CertificatesService,
     private readonly s3Service: S3StorageService,
+    private readonly establishmentsService: EstablishmentsService,
   ) {}
 
   /* ────────── Información general de la empresa ────────── */
@@ -50,6 +53,10 @@ export class InfoService {
     if (dto.address !== undefined) patch.address = dto.address;
     if (dto.establishment !== undefined) patch.establishment = dto.establishment;
     await this.companyRepo.update(company.id, patch);
+    if (dto.establishment !== undefined) {
+      // El establecimiento principal siempre tiene que existir como sucursal.
+      await this.establishmentsService.ensureExists(company.id, dto.establishment);
+    }
     const updated = await this.companyRepo.findOne({
       where: { id: company.id },
       relations: ['plan'],
@@ -154,24 +161,56 @@ export class InfoService {
     }));
   }
 
+  // ── Establecimientos ──
+
+  async listEstablishments(companyId: number) {
+    return this.establishmentsService.findAll(companyId);
+  }
+
+  async createEstablishment(companyId: number, dto: CreateEstablishmentDto) {
+    return this.establishmentsService.create(companyId, dto);
+  }
+
+  async updateEstablishment(companyId: number, estId: number, dto: UpdateEstablishmentDto) {
+    return this.establishmentsService.update(companyId, estId, dto);
+  }
+
+  async deleteEstablishment(companyId: number, estId: number) {
+    return this.establishmentsService.remove(companyId, estId);
+  }
+
   async createEmissionPoint(companyId: number, dto: CreateEmissionPointDto) {
     if (!/^\d{3}$/.test(dto.code)) {
       throw new BadRequestException('El código del punto de emisión debe ser de 3 dígitos numéricos.');
     }
+    const company = await this.companyRepo.findOneByOrFail({ id: companyId });
+    const establishment = await this.establishmentsService.ensureExists(
+      companyId,
+      dto.establecimiento ?? company.establishment,
+    );
     const exists = await this.emissionPointRepo.findOne({
-      where: { companyId, code: dto.code },
+      where: { establishmentId: establishment.id, code: dto.code },
     });
     if (exists) {
-      throw new ConflictException(`Ya existe un punto de emisión con el código ${dto.code}.`);
+      throw new ConflictException(
+        `Ya existe un punto de emisión con el código ${dto.code} en el establecimiento ${establishment.code}.`,
+      );
     }
     const ep = await this.emissionPointRepo.save(
       this.emissionPointRepo.create({
         companyId,
+        establishmentId: establishment.id,
         code: dto.code,
         description: dto.description,
       }),
     );
-    return { id: ep.id, code: ep.code, description: ep.description ?? null, isActive: ep.isActive };
+    return {
+      id: ep.id,
+      code: ep.code,
+      establecimiento: establishment.code,
+      description: ep.description ?? null,
+      isActive: ep.isActive,
+    };
   }
 
   async updateEmissionPoint(companyId: number, empId: number, dto: UpdateEmissionPointDto) {

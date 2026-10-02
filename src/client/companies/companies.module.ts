@@ -13,9 +13,11 @@ import { AccountApiKeyGuard } from '../../common/guards/account-api-key.guard';
 import { JwtOrAccountKeyGuard } from '../../common/guards/jwt-or-account-key.guard';
 import { ClientCompaniesController } from './companies.controller';
 import { ClientCompaniesService } from './companies.service';
+import { EstablishmentsModule } from '../../establishments/establishments.module';
 
 @Module({
   imports: [
+    EstablishmentsModule,
     TypeOrmModule.forFeature([Company, EmissionPoint, CompanySeries, CompanyDocType, Account, SubscriptionPlan, Document]),
     EngineModule,
     CertificatesModule,

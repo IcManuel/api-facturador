@@ -14,6 +14,7 @@ import { UpdateCompanyDto } from './dto/update-company.dto';
 import { CreateEmissionPointDto } from './dto/create-emission-point.dto';
 import { UpdateEmissionPointDto } from './dto/update-emission-point.dto';
 import { SetSequentialDto } from './dto/set-sequential.dto';
+import { EstablishmentsService } from '../../establishments/establishments.service';
 
 @Injectable()
 export class CompaniesService {
@@ -28,6 +29,7 @@ export class CompaniesService {
     private readonly companySeriesRepo: Repository<CompanySeries>,
     private readonly dataSource: DataSource,
     private readonly s3Service: S3StorageService,
+    private readonly establishmentsService: EstablishmentsService,
   ) {}
 
   async findAll(
@@ -208,11 +210,18 @@ export class CompaniesService {
     companyId: number,
     dto: CreateEmissionPointDto,
   ): Promise<EmissionPoint> {
-    await this.findOne(companyId);
+    const company = await this.findOne(companyId);
 
-    const emissionPoint = this.emissionPointRepo.create({
-      ...dto,
+    const establishment = await this.establishmentsService.ensureExists(
       companyId,
+      dto.establecimiento ?? company.establishment,
+    );
+
+    const { establecimiento, ...rest } = dto;
+    const emissionPoint = this.emissionPointRepo.create({
+      ...rest,
+      companyId,
+      establishmentId: establishment.id,
     });
 
     return this.emissionPointRepo.save(emissionPoint);
