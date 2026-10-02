@@ -101,7 +101,7 @@ export class NotificationService {
 
   constructor(private readonly config: ConfigService) {
     const host = config.get('SMTP_HOST');
-    this.from = config.get('SMTP_FROM', 'FacturaEC <noreply@facturaec.com>');
+    this.from = config.get('SMTP_FROM', 'AutorizadorEC <noreply@autorizadorec.com>');
     this.isDev = !host;
 
     if (host) {
@@ -571,7 +571,9 @@ export class NotificationService {
       <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px">
         ${body}
         <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
-        <p style="color:#aaa;font-size:11px;text-align:center">FacturaEC — Facturación Electrónica Ecuador</p>
+        <p style="color:#aaa;font-size:11px;text-align:center">
+          <a href="https://autorizadorec.com" style="color:#aaa;text-decoration:none">AutorizadorEC</a> — Facturación Electrónica Ecuador
+        </p>
       </div>
     `;
   }

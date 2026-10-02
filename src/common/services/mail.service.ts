@@ -6,6 +6,10 @@ export interface DocumentEmailData {
   buyerName: string;
   buyerEmail: string;
   companyName: string;
+  /** Nombre comercial del emisor. Se usa como remitente visible del correo. */
+  companyTradeName?: string | null;
+  /** Correo del emisor. Si viene, las respuestas del comprador le llegan a él. */
+  companyEmail?: string | null;
   companyRuc: string;
   docType: string;
   sequential: string;
@@ -19,6 +23,8 @@ export interface DocumentEmailData {
 export interface CompanyDocumentEmailData {
   companyEmail: string;
   companyName: string;
+  /** Nombre comercial del emisor. Se usa como remitente visible del correo. */
+  companyTradeName?: string | null;
   companyRuc: string;
   docType: string;
   sequential: string;
@@ -59,14 +65,14 @@ export class MailService {
   }
 
   async sendPasswordReset(to: string, name: string, resetUrl: string): Promise<void> {
-    const from = this.config.get('SMTP_FROM', 'FacturaEC <noreply@facturaec.com>');
+    const from = this.config.get('SMTP_FROM', 'AutorizadorEC <noreply@autorizadorec.com>');
 
     const html = `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
         <h2 style="color:#1a1a2e;margin-bottom:8px">Recuperar Contraseña</h2>
         <p style="color:#555;font-size:14px">Hola <strong>${name}</strong>,</p>
         <p style="color:#555;font-size:14px">
-          Recibimos una solicitud para restablecer tu contraseña en FacturaEC.
+          Recibimos una solicitud para restablecer tu contraseña en AutorizadorEC.
           Haz clic en el siguiente enlace para crear una nueva contraseña:
         </p>
         <div style="text-align:center;margin:24px 0">
@@ -78,7 +84,9 @@ export class MailService {
           Este enlace expira en 15 minutos. Si no solicitaste este cambio, ignora este correo.
         </p>
         <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
-        <p style="color:#aaa;font-size:11px;text-align:center">FacturaEC — Facturación Electrónica Ecuador</p>
+        <p style="color:#aaa;font-size:11px;text-align:center">
+          <a href="https://autorizadorec.com" style="color:#aaa;text-decoration:none">AutorizadorEC</a> — Facturación Electrónica Ecuador
+        </p>
       </div>
     `;
 
@@ -86,7 +94,7 @@ export class MailService {
       const result = await this.transporter.sendMail({
         from,
         to,
-        subject: 'Recuperar contraseña — FacturaEC',
+        subject: 'Recuperar contraseña — AutorizadorEC',
         html,
       });
 
@@ -104,8 +112,36 @@ export class MailService {
     }
   }
 
+
+  /**
+   * Remitente con el nombre del emisor: el cliente final ve el nombre de la
+   * empresa que le factura, no el de la plataforma. La dirección de correo
+   * sigue siendo la configurada en SMTP_FROM.
+   */
+  private fromWithName(displayName?: string | null): string {
+    const configured = this.config.get('SMTP_FROM', 'AutorizadorEC <noreply@autorizadorec.com>');
+    if (!displayName) return configured;
+
+    const match = configured.match(/<([^>]+)>/);
+    const address = match ? match[1] : configured;
+    const safeName = displayName.replace(/["\\]/g, '').trim();
+    if (!safeName) return configured;
+
+    return `"${safeName}" <${address}>`;
+  }
+
+  /** Pie de los correos que ve el cliente final. */
+  private footer(companyName: string): string {
+    return `
+        <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+        <p style="color:#aaa;font-size:11px;text-align:center">
+          ${companyName} — Documento generado por
+          <a href="https://autorizadorec.com" style="color:#aaa;text-decoration:underline">AutorizadorEC</a>
+        </p>`;
+  }
+
   async sendDocumentAuthorized(data: DocumentEmailData): Promise<void> {
-    const from = this.config.get('SMTP_FROM', 'FacturaEC <noreply@facturaec.com>');
+    const from = this.fromWithName(data.companyTradeName || data.companyName);
 
     const docTypeLabels: Record<string, string> = {
       '01': 'Factura',
@@ -152,10 +188,7 @@ export class MailService {
         <p style="color:#555;font-size:13px">
           Adjunto encontrará el RIDE (PDF) y el comprobante electrónico (XML) autorizados.
         </p>
-        <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
-        <p style="color:#aaa;font-size:11px;text-align:center">
-          ${data.companyName} — Documento generado por FacturaEC
-        </p>
+        ${this.footer(data.companyName)}
       </div>
     `;
 
@@ -178,6 +211,7 @@ export class MailService {
     try {
       await this.transporter.sendMail({
         from,
+        replyTo: data.companyEmail || undefined,
         to: data.buyerEmail,
         subject: `${docTypeLabel} ${data.sequential} — ${data.companyName}`,
         html,
@@ -196,7 +230,7 @@ export class MailService {
   }
 
   async sendDocumentAuthorizedToCompany(data: CompanyDocumentEmailData): Promise<void> {
-    const from = this.config.get('SMTP_FROM', 'FacturaEC <noreply@facturaec.com>');
+    const from = this.fromWithName(data.companyTradeName || data.companyName);
 
     const docTypeLabels: Record<string, string> = {
       '01': 'Factura',
@@ -245,7 +279,8 @@ export class MailService {
         </p>
         <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
         <p style="color:#aaa;font-size:11px;text-align:center">
-          ${data.companyName} (${data.companyRuc}) — Generado por FacturaEC
+          ${data.companyName} (${data.companyRuc}) — Generado por
+          <a href="https://autorizadorec.com" style="color:#aaa;text-decoration:underline">AutorizadorEC</a>
         </p>
       </div>
     `;

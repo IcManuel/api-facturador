@@ -859,6 +859,8 @@ export class DocumentProcessingService {
     const company = doc.company;
     const emailData = {
       companyName: company.name,
+      companyTradeName: company.tradeName,
+      companyEmail: company.email,
       companyRuc: company.ruc,
       docType: doc.typeCode,
       sequential: doc.sequential,
