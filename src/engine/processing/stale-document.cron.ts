@@ -39,6 +39,9 @@ export class StaleDocumentCron {
 
   /** No se reconsultan comprobantes fallidos más viejos que esto. */
   private readonly FAILED_RECHECK_MAX_DAYS = 7;
+
+  /** Tope de reconsultas por comprobante antes de darlo por perdido. */
+  private readonly FAILED_RECHECK_MAX_ATTEMPTS = 12;
   /** SRI-incident threshold: this many docs with system errors within the window triggers an alert */
   private readonly INCIDENT_THRESHOLD = 8;
   private readonly INCIDENT_WINDOW_MIN = 60;
@@ -244,11 +247,31 @@ export class StaleDocumentCron {
 
     if (candidatos.length === 0) return;
 
-    this.logger.warn(
-      `Reconsultando ${candidatos.length} comprobante(s) FAILED que ya habían llegado al SRI`,
-    );
+    let reconsultados = 0;
 
     for (const { doc_id } of candidatos) {
+      const doc = await this.docRepo.findOne({ where: { id: doc_id } });
+      if (!doc) continue;
+
+      // Espaciado creciente entre reconsultas: 5, 10, 20, 40 y 60 minutos, con
+      // un tope de intentos. Así no se consulta al SRI cada 5 minutos durante
+      // días por un comprobante que no va a cambiar.
+      const marca = (doc.payload as any)?._authRecheck ?? { attempts: 0, lastAt: null };
+      if (marca.attempts >= this.FAILED_RECHECK_MAX_ATTEMPTS) continue;
+
+      const esperaMin = Math.min(this.FAILED_RECHECK_MIN * 2 ** marca.attempts, 60);
+      if (marca.lastAt && Date.now() - new Date(marca.lastAt).getTime() < esperaMin * 60_000) {
+        continue;
+      }
+
+      await this.docRepo.update(doc_id, {
+        payload: {
+          ...(doc.payload as any),
+          _authRecheck: { attempts: marca.attempts + 1, lastAt: new Date().toISOString() },
+        } as any,
+      });
+
+      reconsultados++;
       try {
         const result = await this.processingService.retryAuthorization(doc_id);
         if (result.status === 'authorized') {
@@ -257,6 +280,12 @@ export class StaleDocumentCron {
       } catch (err: any) {
         this.logger.debug(`Document ${doc_id}: reconsulta fallida — ${err.message}`);
       }
+    }
+
+    if (reconsultados > 0) {
+      this.logger.warn(
+        `Reconsultados ${reconsultados} comprobante(s) FAILED que ya habían llegado al SRI`,
+      );
     }
   }
 
