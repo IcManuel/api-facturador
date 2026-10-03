@@ -953,7 +953,8 @@ export class DocumentProcessingService {
   ): Promise<void> {
     await this.errorRepo.save({
       documentId,
-      code: code || 'UNKNOWN',
+      // la columna es VARCHAR(30): un código más largo no debe impedir registrar el error
+      code: (code || 'UNKNOWN').substring(0, 30),
       message: message?.substring(0, 500) || 'Error desconocido',
       detail: detail || undefined,
       category: category === 'client' ? SriErrorCategory.CLIENT : SriErrorCategory.SYSTEM,
