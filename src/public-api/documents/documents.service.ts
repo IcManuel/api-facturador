@@ -1,6 +1,6 @@
 import {
   Injectable, BadRequestException, ConflictException, ForbiddenException,
-  NotFoundException, Logger,
+  NotFoundException, Logger, ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -145,6 +145,12 @@ export class PublicDocumentsService {
   async correct(company: Company, accessKey: string, dto: CreateDocumentDto) {
     const doc = await this.getCorrectableDocument(company.id, accessKey);
 
+    // Si el comprobante ya llegó al SRI, puede estar autorizado aunque aquí figure
+    // como fallido o rechazado. Regenerar su clave perdería esa autorización y el
+    // cliente terminaría con dos facturas. Se verifica antes de tocar nada.
+    const yaAutorizado = await this.guardAlreadyAuthorizedAtSri(doc);
+    if (yaAutorizado) return yaAutorizado;
+
     await this.resetAndUpdateDocument(doc, company, dto);
 
     await this.documentQueue.add('process', { documentId: doc.id }, {
@@ -164,6 +170,12 @@ export class PublicDocumentsService {
    */
   async correctSync(company: Company, accessKey: string, dto: CreateDocumentDto) {
     const doc = await this.getCorrectableDocument(company.id, accessKey);
+
+    // Si el comprobante ya llegó al SRI, puede estar autorizado aunque aquí figure
+    // como fallido o rechazado. Regenerar su clave perdería esa autorización y el
+    // cliente terminaría con dos facturas. Se verifica antes de tocar nada.
+    const yaAutorizado = await this.guardAlreadyAuthorizedAtSri(doc);
+    if (yaAutorizado) return yaAutorizado;
 
     await this.resetAndUpdateDocument(doc, company, dto);
 
@@ -671,7 +683,36 @@ export class PublicDocumentsService {
    * Regenerates the access key if the document was already sent to SRI (REJECTED/FAILED),
    * because the old key is "burned" and will trigger error 70 at reception.
    */
+
+  /**
+   * Antes de corregir un comprobante que ya se envió al SRI, verifica que no esté
+   * autorizado con su clave actual ni con ninguna anterior. Si lo está, el
+   * documento queda AUTORIZADO con esa clave y la corrección no se aplica.
+   */
+  private async guardAlreadyAuthorizedAtSri(doc: Document) {
+    const sent = doc.status === DocStatus.REJECTED || doc.status === DocStatus.FAILED;
+    if (!sent) return null;
+
+    const sync = await this.processingService.syncIfAuthorizedAtSri(doc.id);
+    if (sync === 'unverifiable') {
+      throw new ServiceUnavailableException(
+        'No se pudo verificar con el SRI si este comprobante ya está autorizado. ' +
+        'Para no arriesgar una factura duplicada, intente la corrección en unos minutos.',
+      );
+    }
+    if (sync !== 'authorized') return null;
+
+    const updated = await this.docRepo.findOne({ where: { id: doc.id }, relations: ['company'] });
+    return {
+      ...this.formatResponse(updated ?? doc),
+      aviso:
+        'Este comprobante ya estaba autorizado en el SRI, así que no se aplicó la corrección. ' +
+        'Si necesita modificarlo, emita una nota de crédito.',
+    };
+  }
+
   private async resetAndUpdateDocument(doc: Document, company: Company, dto: CreateDocumentDto): Promise<void> {
+    const previousKeyBeforeReset = doc.accessKey;
     // Clean old processing artifacts
     await this.timelineRepo.delete({ documentId: doc.id });
     await this.errorRepo.delete({ documentId: doc.id });
@@ -699,8 +740,14 @@ export class PublicDocumentsService {
       });
     }
 
-    // Update payload and recalculated fields
-    doc.payload = dto as any;
+    // Update payload and recalculated fields. El historial de claves se conserva:
+    // si la clave cambió, la anterior se agrega para poder verificarla en el SRI.
+    const previousKeys = DocumentProcessingService.previousKeysOf(doc);
+    doc.payload = (
+      previousKeyBeforeReset && previousKeyBeforeReset !== doc.accessKey
+        ? DocumentProcessingService.payloadWithPreviousKey({ ...dto, _clavesAnteriores: previousKeys } as any, previousKeyBeforeReset)
+        : { ...dto, ...(previousKeys.length ? { _clavesAnteriores: previousKeys } : {}) }
+    ) as any;
     doc.status = DocStatus.CREATED;
     if (doc.typeCode === SriDocTypeCode.RETENCION) {
       const totalRetenido = (dto.impuestosRetencion || []).reduce((s, i) => s + i.valorRetenido, 0);

@@ -549,6 +549,80 @@ export class DocumentProcessingService {
     return !!sent;
   }
 
+
+  /* ────────── Historial de claves de acceso ────────── */
+
+  /**
+   * Claves de acceso que tuvo el documento antes de la actual. Se guardan en el
+   * payload cada vez que el sistema regenera la clave (corrección o reemisión).
+   *
+   * Sin este historial, un comprobante que el SRI autorizó con una clave anterior
+   * queda perdido: al reenviarlo con la clave nueva el SRI responde 45 (secuencial
+   * registrado) y el documento figura como fallido aunque esté autorizado.
+   */
+  static previousKeysOf(doc: Document): string[] {
+    const prev = (doc.payload as any)?._clavesAnteriores;
+    return Array.isArray(prev) ? prev.filter((k: unknown) => typeof k === 'string') : [];
+  }
+
+  /** Devuelve el payload con `oldKey` agregada al historial de claves. */
+  static payloadWithPreviousKey(payload: Record<string, any> | null | undefined, oldKey: string): Record<string, any> {
+    const base = { ...(payload ?? {}) };
+    const prev: string[] = Array.isArray(base._clavesAnteriores) ? base._clavesAnteriores : [];
+    base._clavesAnteriores = Array.from(new Set([...prev, oldKey].filter(Boolean)));
+    return base;
+  }
+
+  /**
+   * Pregunta al SRI por la clave actual y por todas las anteriores. Si alguna está
+   * AUTORIZADA, deja el documento con esa clave y completa la autorización
+   * (archivos, avisos), en vez de generar una clave nueva.
+   *
+   *  - 'authorized'     → el documento quedó autorizado con la clave del SRI
+   *  - 'not_authorized' → ninguna clave está autorizada: se puede regenerar
+   *  - 'unverifiable'   → el SRI no respondió: NO es seguro regenerar
+   */
+  async syncIfAuthorizedAtSri(
+    documentId: number,
+    options: { notify?: boolean } = {},
+  ): Promise<'authorized' | 'not_authorized' | 'unverifiable'> {
+    const notify = options.notify ?? true;
+    const doc = await this.docRepo.findOne({ where: { id: documentId } });
+    if (!doc) return 'not_authorized';
+
+    const keys = Array.from(new Set([doc.accessKey, ...DocumentProcessingService.previousKeysOf(doc)]));
+
+    for (const key of keys) {
+      let auth: SriAuthorizationResult;
+      try {
+        auth = await this.sriService.checkAuthorization(key, doc.env);
+      } catch (err: any) {
+        this.logger.warn(`Document ${documentId}: no se pudo consultar la clave ${key} en el SRI — ${err.message}`);
+        return 'unverifiable';
+      }
+      if (!auth.authorized) continue;
+
+      this.logger.warn(
+        `Document ${documentId}: el SRI ya lo tiene AUTORIZADO con la clave ${key}` +
+        (key !== doc.accessKey ? ` (clave anterior; la actual era ${doc.accessKey})` : ''),
+      );
+      await this.docRepo.update(documentId, {
+        accessKey: key,
+        status: DocStatus.RECEIVED,
+        payload: DocumentProcessingService.payloadWithPreviousKey(doc.payload as any, doc.accessKey) as any,
+      });
+      await this.addTimeline(documentId, 'sri_received', TimelineStepStatus.COMPLETED, 90,
+        `El SRI ya lo tenía autorizado con la clave ${key}. Se usa esa clave y no se genera una nueva.`);
+      // Dentro del pipeline el aviso lo da processDocument al terminar; fuera de
+      // él (corrección, reemisión) hay que avisar aquí.
+      const result = notify
+        ? await this.retryAuthorization(documentId)
+        : await this.runAuthorizationCheck(documentId);
+      return result.status === 'authorized' ? 'authorized' : 'not_authorized';
+    }
+    return 'not_authorized';
+  }
+
   async retryAuthorization(documentId: number): Promise<ProcessingResult> {
     const result = await this.runAuthorizationCheck(documentId);
     if (result.status !== 'processing') {
@@ -655,6 +729,25 @@ export class DocumentProcessingService {
     startTime: number,
     sriStartTime: number,
   ): Promise<ProcessingResult> {
+    // Error 45 (secuencial registrado): el SRI ya tiene ese número con otra clave.
+    // Puede ser NUESTRA clave anterior, autorizada: en ese caso el documento está
+    // autorizado y rechazarlo llevaría al cliente a facturar dos veces.
+    if (receptionResult.messages.some((m) => m.identifier === '45')) {
+      const previous = DocumentProcessingService.previousKeysOf(doc).filter((k) => k !== doc.accessKey);
+      if (previous.length > 0) {
+        const sync = await this.syncIfAuthorizedAtSri(documentId, { notify: false });
+        if (sync === 'authorized') {
+          const synced = await this.docRepo.findOne({ where: { id: documentId } });
+          return {
+            status: 'authorized',
+            authorizationNumber: synced?.authNumber ?? undefined,
+            errors: [],
+            processingTimeMs: Date.now() - startTime,
+          } as ProcessingResult;
+        }
+      }
+    }
+
     const category = action === SriErrorAction.FATAL ? 'system' : 'client';
     const status = action === SriErrorAction.FATAL ? DocStatus.FAILED : DocStatus.REJECTED;
     const resultStatus = action === SriErrorAction.FATAL ? 'failed' : 'rejected';
@@ -664,9 +757,10 @@ export class DocumentProcessingService {
 
     for (const msg of receptionResult.messages) {
       const detail = msg.identifier === '45'
-        ? `El SRI ya tiene registrado otro comprobante con el número ${doc.sequential} ` +
-          '(probablemente emitido antes desde otro sistema). Configure el próximo secuencial ' +
-          'con PUT /company/sequentials, o desde el panel en Configuración, y vuelva a emitir.'
+        ? `El SRI ya tiene registrado otro comprobante con el número ${doc.sequential}, con una clave de acceso ` +
+          'distinta, y no está autorizado con ninguna clave de este documento. Si emitió ese número desde otro ' +
+          'sistema, configure el próximo secuencial (PUT /company/sequentials o desde el panel) y vuelva a emitir. ' +
+          'Si no lo emitió por fuera, contáctenos antes de reemitir.'
         : msg.additionalInfo;
       await this.addError(documentId, msg.identifier, msg.message, detail, category);
       collectedErrors.push({ code: msg.identifier, message: msg.message, detail });
@@ -1611,7 +1705,27 @@ export class DocumentProcessingService {
     const company = doc.company;
     if (!company) throw new BadRequestException('Empresa no encontrada para el documento');
 
-    // 1. Ask SRI if the existing key is already authorized — don't duplicate.
+    // 1. Ask SRI if the existing key — or ANY previous key — is already authorized.
+    //    Regenerating the key of an authorized document loses the authorization.
+    const previousKeys = DocumentProcessingService.previousKeysOf(doc).filter((k) => k !== doc.accessKey);
+    if (previousKeys.length > 0) {
+      const sync = await this.syncIfAuthorizedAtSri(documentId);
+      if (sync === 'authorized') {
+        const synced = await this.docRepo.findOne({ where: { id: documentId } });
+        return {
+          outcome: 'synced_authorized',
+          authorized: true,
+          authorizationNumber: synced?.authNumber ?? null,
+          oldAccessKey: doc.accessKey,
+        };
+      }
+      if (sync === 'unverifiable') {
+        throw new BadRequestException(
+          'No se pudo verificar con el SRI si este comprobante ya está autorizado. Intente en unos minutos.',
+        );
+      }
+    }
+
     let sriAuth: SriAuthorizationResult | null = null;
     try {
       sriAuth = await this.sriService.checkAuthorization(doc.accessKey, doc.env);
@@ -1661,7 +1775,7 @@ export class DocumentProcessingService {
     const yyyy = String(today.getFullYear());
     const todayDdMmYyyy = `${dd}/${mm}/${yyyy}`;
 
-    const newPayload = { ...(doc.payload ?? {}) } as Record<string, any>;
+    const newPayload = DocumentProcessingService.payloadWithPreviousKey(doc.payload as any, oldAccessKey);
     newPayload.fechaEmision = todayDdMmYyyy;
     if (doc.typeCode === SriDocTypeCode.GUIA_REMISION && newPayload.fechaIniTransporte) {
       newPayload.fechaIniTransporte = todayDdMmYyyy;
