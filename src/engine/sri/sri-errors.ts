@@ -52,10 +52,14 @@ export const SRI_ERROR_MAP: Record<string, SriErrorDef> = {
     description: 'CLAVE DE ACCESO REGISTRADA — SRI already received this document',
     transient: false,
   },
+  // Error 45 = SECUENCIAL REGISTRADO: el SRI ya tiene OTRO comprobante con ese
+  // número (tipo + establecimiento + punto + secuencial), con otra clave de
+  // acceso. Típico cuando el emisor ya usó ese número desde otro sistema.
+  // Esta clave nunca va a autorizarse: hay que rechazar y usar otro secuencial.
   '45': {
-    action: SriErrorAction.SKIP_TO_AUTH,
-    description: 'CLAVE DE ACCESO REGISTRADA Y EN PROCESAMIENTO',
-    transient: true,
+    action: SriErrorAction.REJECT,
+    description: 'SECUENCIAL REGISTRADO — ese número ya fue usado en el SRI con otra clave de acceso',
+    transient: false,
   },
 
   // -- XML structure / schema validation error --

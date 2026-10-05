@@ -320,8 +320,24 @@ export class DocumentProcessingService {
             this.emitStatusChange(doc, 'FAILED');
             return { status: 'failed', errors: collectedErrors, processingTimeMs: Date.now() - startTime };
           } else {
-            // Error changed to non-RETRY — handle by new action
+            // El SRI dejó de responder "en procesamiento" y respondió otra cosa.
             const newAction = classifySriMessages(receptionResult.messages);
+
+            // "Clave ya registrada" (43) o "ya autorizado" (35) significan que el SRI
+            // YA TIENE el comprobante: hay que consultar la autorización, no rechazar.
+            // Antes este caso caía en el rechazo y un comprobante autorizado en el
+            // SRI quedaba aquí como REJECTED.
+            if (newAction === SriErrorAction.SKIP_TO_AUTH || newAction === SriErrorAction.ALREADY_AUTHORIZED) {
+              const errCode = receptionResult.messages[0]?.identifier;
+              this.logger.log(`Document ${documentId}: SRI reports it already has the document after reception retries (error ${errCode}) — checking authorization`);
+              await this.updateLastTimeline(documentId, TimelineStepStatus.COMPLETED,
+                'Clave de acceso ya registrada en el SRI', Date.now() - sriStartTime);
+              await this.docRepo.update(documentId, { status: DocStatus.RECEIVED });
+              return this.checkAuthorizationAndFinish(
+                documentId, doc, signedXml, stepOrder, startTime, collectedErrors,
+              );
+            }
+
             return this.handleReceptionByAction(
               newAction, documentId, doc, signedXml, receptionResult,
               collectedErrors, stepOrder, startTime, sriStartTime,
@@ -647,8 +663,13 @@ export class DocumentProcessingService {
       `SRI rechazó la recepción: ${receptionResult.state}`, Date.now() - sriStartTime);
 
     for (const msg of receptionResult.messages) {
-      await this.addError(documentId, msg.identifier, msg.message, msg.additionalInfo, category);
-      collectedErrors.push({ code: msg.identifier, message: msg.message, detail: msg.additionalInfo });
+      const detail = msg.identifier === '45'
+        ? `El SRI ya tiene registrado otro comprobante con el número ${doc.sequential} ` +
+          '(probablemente emitido antes desde otro sistema). Configure el próximo secuencial ' +
+          'con PUT /company/sequentials, o desde el panel en Configuración, y vuelva a emitir.'
+        : msg.additionalInfo;
+      await this.addError(documentId, msg.identifier, msg.message, detail, category);
+      collectedErrors.push({ code: msg.identifier, message: msg.message, detail });
     }
 
     await this.docRepo.update(documentId, {
