@@ -132,7 +132,7 @@ export class SmtpService {
       smtp.verifiedAt = new Date();
       await this.repo.save(smtp);
 
-      return { success: true, message: 'Conexión exitosa. Se envió un email de prueba.' };
+      return { success: true, message: `Conexión exitosa. Se envió un correo de prueba desde ${smtp.fromEmail} hacia ${testEmail}.` };
     } catch (err: any) {
       return {
         success: false,
