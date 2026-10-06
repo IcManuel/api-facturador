@@ -37,6 +37,12 @@ export interface CompanyDocumentEmailData {
   xmlBuffer?: Buffer;
 }
 
+/** Servidor de correo propio de una empresa (SMTP personalizado). */
+export interface CompanySender {
+  transporter: nodemailer.Transporter;
+  from: string;
+}
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -130,6 +136,23 @@ export class MailService {
     return `"${safeName}" <${address}>`;
   }
 
+  /**
+   * Envía por el SMTP propio de la empresa si lo tiene. Si ese servidor falla,
+   * el correo sale igual por el de la plataforma: el comprobante no se debe perder.
+   */
+  private async deliver(mail: nodemailer.SendMailOptions, sender?: CompanySender | null): Promise<'company' | 'platform'> {
+    if (sender) {
+      try {
+        await sender.transporter.sendMail({ ...mail, from: sender.from });
+        return 'company';
+      } catch (err: any) {
+        this.logger.warn(`Company SMTP failed for ${mail.to}, falling back to platform SMTP: ${err.message}`);
+      }
+    }
+    await this.transporter.sendMail(mail);
+    return 'platform';
+  }
+
   /** Pie de los correos que ve el cliente final. */
   private footer(companyName: string): string {
     return `
@@ -140,7 +163,7 @@ export class MailService {
         </p>`;
   }
 
-  async sendDocumentAuthorized(data: DocumentEmailData): Promise<void> {
+  async sendDocumentAuthorized(data: DocumentEmailData, sender?: CompanySender | null): Promise<void> {
     const from = this.fromWithName(data.companyTradeName || data.companyName);
 
     const docTypeLabels: Record<string, string> = {
@@ -209,19 +232,19 @@ export class MailService {
     }
 
     try {
-      await this.transporter.sendMail({
+      const via = await this.deliver({
         from,
         replyTo: data.companyEmail || undefined,
         to: data.buyerEmail,
         subject: `${docTypeLabel} ${data.sequential} — ${data.companyName}`,
         html,
         attachments,
-      });
+      }, sender);
 
-      if (!this.config.get('SMTP_HOST')) {
+      if (!this.config.get('SMTP_HOST') && via === 'platform') {
         this.logger.log(`[DEV EMAIL] Document authorized to: ${data.buyerEmail} | ${data.sequential}`);
       } else {
-        this.logger.log(`Document email sent to ${data.buyerEmail} for ${data.sequential}`);
+        this.logger.log(`Document email sent to ${data.buyerEmail} for ${data.sequential} (via ${via} SMTP)`);
       }
     } catch (err: any) {
       this.logger.error(`Failed to send document email to ${data.buyerEmail}: ${err.message}`);
@@ -229,7 +252,7 @@ export class MailService {
     }
   }
 
-  async sendDocumentAuthorizedToCompany(data: CompanyDocumentEmailData): Promise<void> {
+  async sendDocumentAuthorizedToCompany(data: CompanyDocumentEmailData, sender?: CompanySender | null): Promise<void> {
     const from = this.fromWithName(data.companyTradeName || data.companyName);
 
     const docTypeLabels: Record<string, string> = {
@@ -302,18 +325,18 @@ export class MailService {
     }
 
     try {
-      await this.transporter.sendMail({
+      const via = await this.deliver({
         from,
         to: data.companyEmail,
         subject: `[Copia] ${docTypeLabel} ${data.sequential} — ${data.buyerName}`,
         html,
         attachments,
-      });
+      }, sender);
 
-      if (!this.config.get('SMTP_HOST')) {
+      if (!this.config.get('SMTP_HOST') && via === 'platform') {
         this.logger.log(`[DEV EMAIL] Company copy to: ${data.companyEmail} | ${data.sequential}`);
       } else {
-        this.logger.log(`Company copy email sent to ${data.companyEmail} for ${data.sequential}`);
+        this.logger.log(`Company copy email sent to ${data.companyEmail} for ${data.sequential} (via ${via} SMTP)`);
       }
     } catch (err: any) {
       this.logger.error(`Failed to send company email to ${data.companyEmail}: ${err.message}`);

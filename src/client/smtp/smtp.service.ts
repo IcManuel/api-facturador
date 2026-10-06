@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as nodemailer from 'nodemailer';
 import { CompanySmtp } from '../../entities/company-smtp.entity';
+import { Company } from '../../entities/company.entity';
 import { CryptoService } from '../../common/services/crypto.service';
 import { UpsertSmtpDto } from './dto/upsert-smtp.dto';
 
@@ -11,8 +12,21 @@ export class SmtpService {
   constructor(
     @InjectRepository(CompanySmtp)
     private readonly repo: Repository<CompanySmtp>,
+    @InjectRepository(Company)
+    private readonly companyRepo: Repository<Company>,
     private readonly crypto: CryptoService,
   ) {}
+
+  /** Valida que la empresa exista y pertenezca a la cuenta del usuario del panel. */
+  async assertCompanyOfAccount(accountId: number, companyId: number): Promise<void> {
+    if (!companyId || !Number.isInteger(companyId) || companyId <= 0) {
+      throw new BadRequestException('Indique la empresa (companyId) a la que pertenece la configuración SMTP');
+    }
+    const exists = (await this.companyRepo.count({ where: { id: companyId, accountId } })) > 0;
+    if (!exists) {
+      throw new NotFoundException('Empresa no encontrada en su cuenta');
+    }
+  }
 
   async findByCompany(companyId: number): Promise<any> {
     const smtp = await this.repo.findOne({ where: { companyId } });
@@ -94,25 +108,8 @@ export class SmtpService {
       throw new NotFoundException('No hay configuración SMTP. Guarda la configuración primero.');
     }
 
-    const password = this.crypto.decryptString(smtp.password, smtp.passwordIv);
-
-    const transportOpts: any = {
-      host: smtp.host,
-      port: smtp.port,
-      auth: { user: smtp.user, pass: password },
-    };
-
-    if (smtp.secure === 'ssl') {
-      transportOpts.secure = true;
-    } else if (smtp.secure === 'tls') {
-      transportOpts.secure = false;
-      transportOpts.tls = { rejectUnauthorized: false };
-    } else {
-      transportOpts.secure = false;
-    }
-
     try {
-      const transporter = nodemailer.createTransport(transportOpts);
+      const transporter = this.buildTransport(smtp);
       await transporter.verify();
 
       await transporter.sendMail({
@@ -144,17 +141,32 @@ export class SmtpService {
     }
   }
 
-  /** Used by the email engine to get a transporter for a company */
-  async getTransporter(companyId: number): Promise<nodemailer.Transporter | null> {
+  /**
+   * Servidor de correo propio de la empresa, si lo tiene activo.
+   * Lo usa el motor de documentos para enviar los comprobantes autorizados.
+   */
+  async getSender(companyId: number): Promise<{ transporter: nodemailer.Transporter; from: string } | null> {
     const smtp = await this.repo.findOne({ where: { companyId, isActive: true } });
     if (!smtp) return null;
 
+    const safeName = (smtp.fromName || '').replace(/["\\]/g, '').trim();
+    return {
+      transporter: this.buildTransport(smtp),
+      from: safeName ? `"${safeName}" <${smtp.fromEmail}>` : smtp.fromEmail,
+    };
+  }
+
+  private buildTransport(smtp: CompanySmtp): nodemailer.Transporter {
     const password = this.crypto.decryptString(smtp.password, smtp.passwordIv);
 
     const opts: any = {
       host: smtp.host,
       port: smtp.port,
       auth: { user: smtp.user, pass: password },
+      // Un servidor del cliente que no responde no debe colgar el envío
+      connectionTimeout: 15_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 30_000,
     };
 
     if (smtp.secure === 'ssl') {

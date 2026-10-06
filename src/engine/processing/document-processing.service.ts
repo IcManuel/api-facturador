@@ -17,7 +17,8 @@ import { AccessKeyService } from '../sequential/access-key.service';
 import { S3StorageService } from '../storage/s3.service';
 import { RideService, RideData } from '../ride/ride.service';
 import { CryptoService } from '../../common/services/crypto.service';
-import { MailService } from '../../common/services/mail.service';
+import { MailService, CompanySender } from '../../common/services/mail.service';
+import { SmtpService } from '../../client/smtp/smtp.service';
 import { classifySriMessages, SriErrorAction } from '../sri/sri-errors';
 import { EventsGateway } from '../../events/events.gateway';
 import { NotificationService } from '../../notifications/notification.service';
@@ -68,6 +69,7 @@ export class DocumentProcessingService {
     private readonly eventsGateway: EventsGateway,
     private readonly notificationService: NotificationService,
     private readonly statusNotifier: DocumentStatusNotifier,
+    private readonly smtpService: SmtpService,
   ) {}
 
   /**
@@ -986,6 +988,17 @@ export class DocumentProcessingService {
       xmlBuffer: files.xmlBuffer,
     };
 
+    // SMTP propio de la empresa, si lo tiene activo. Si no se puede armar,
+    // los correos salen por el servidor de la plataforma.
+    let sender: CompanySender | null = null;
+    if (company.notifyClient || company.notifyCompany) {
+      try {
+        sender = await this.smtpService.getSender(company.id);
+      } catch (err: any) {
+        this.logger.warn(`Company SMTP unavailable for company ${company.id}: ${err.message}`);
+      }
+    }
+
     // Send to buyer if company has notifyClient enabled and buyer email exists
     if (company.notifyClient) {
       const buyerEmail = doc.payload?.emailComprador;
@@ -995,7 +1008,7 @@ export class DocumentProcessingService {
             ...emailData,
             buyerName: doc.buyerName || 'Cliente',
             buyerEmail,
-          });
+          }, sender);
         } catch (err: any) {
           this.logger.warn(`Failed to send buyer email for doc ${doc.id}: ${err.message}`);
         }
@@ -1010,7 +1023,7 @@ export class DocumentProcessingService {
           companyEmail: company.email,
           buyerName: doc.buyerName || 'CONSUMIDOR FINAL',
           buyerId: doc.buyerId || '9999999999999',
-        });
+        }, sender);
       } catch (err: any) {
         this.logger.warn(`Failed to send company email for doc ${doc.id}: ${err.message}`);
       }

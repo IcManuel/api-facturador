@@ -23,6 +23,7 @@ import { DocumentFile } from '../entities/document-file.entity';
 import { Certificate } from '../entities/certificate.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { Establishment } from '../entities/establishment.entity';
+import { ClientSmtpModule } from '../client/smtp/smtp.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { Establishment } from '../entities/establishment.entity';
     TypeOrmModule.forFeature([
       Establishment,Document, DocumentTimeline, DocumentError, DocumentFile, Certificate]),
     NotificationsModule,
+    ClientSmtpModule,
   ],
   providers: [
     SequentialService,
