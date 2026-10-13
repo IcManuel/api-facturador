@@ -65,7 +65,7 @@ const LONG_SUCURSAL =
 
 function baseData(
   codDoc: string,
-  opts: { logo?: boolean; long?: boolean } = {},
+  opts: { logo?: boolean; long?: boolean; short?: boolean } = {},
 ): RideData {
   const data: RideData = {
     razonSocial: opts.long
@@ -75,10 +75,16 @@ function baseData(
       ? 'SERVI TEAM - CENTRO DE REPARACIONES AUTORIZADO'
       : undefined,
     ruc: '0691234567001',
-    dirMatriz: opts.long ? LONG_MATRIZ : 'AV. DANIEL LEON BORJA Y DUCHICELA',
+    dirMatriz: opts.long
+      ? LONG_MATRIZ
+      : opts.short
+        ? 'Del chamburo'
+        : 'AV. DANIEL LEON BORJA Y DUCHICELA',
     dirEstablecimiento: opts.long
       ? LONG_SUCURSAL
-      : 'AV. DANIEL LEON BORJA Y DUCHICELA',
+      : opts.short
+        ? 'Del chamburo'
+        : 'AV. DANIEL LEON BORJA Y DUCHICELA',
     obligadoContabilidad: 'NO',
     contribuyenteRimpe: opts.long ? 'CONTRIBUYENTE RÉGIMEN RIMPE' : undefined,
     contribuyenteEspecial: opts.long ? '12345' : undefined,
@@ -184,11 +190,20 @@ function baseData(
 const DOC_TYPES = ['01', '03', '04', '05', '06', '07'];
 const SCENARIOS = DOC_TYPES.flatMap((codDoc) =>
   [false, true].flatMap((logo) =>
-    [false, true].map((long) => ({ codDoc, logo, long })),
+    [
+      { long: false, short: false },
+      { long: true, short: false },
+      { long: false, short: true },
+    ].map((addr) => ({ codDoc, logo, ...addr })),
   ),
 );
-const scenarioKey = (s: { codDoc: string; logo: boolean; long: boolean }) =>
-  `${s.codDoc}${s.logo ? '-logo' : ''}${s.long ? '-long' : ''}`;
+const scenarioKey = (s: {
+  codDoc: string;
+  logo: boolean;
+  long: boolean;
+  short: boolean;
+}) =>
+  `${s.codDoc}${s.logo ? '-logo' : ''}${s.long ? '-long' : ''}${s.short ? '-corta' : ''}`;
 
 /** Texto dibujado en el PDF, en orden, con su posición (extraído del PDF ya generado). */
 function extractText(pdf: Buffer): string[] {
@@ -309,7 +324,7 @@ describe('RIDE — encabezado del emisor', () => {
       ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
       : {};
 
-    it('la línea base cubre los 6 comprobantes, con y sin logo, direcciones cortas y largas', () => {
+    it('la línea base cubre los 6 comprobantes, con y sin logo, direcciones de una línea, medianas y largas', () => {
       expect(Object.keys(baseline).sort()).toEqual(
         SCENARIOS.map(scenarioKey).sort(),
       );
@@ -437,6 +452,14 @@ describe('RIDE — encabezado del emisor', () => {
           expect(printed.map((r) => squash(r.value))).toEqual(
             data.contactosEmisor.map((c) => squash(c.valor)),
           );
+
+          // Aire visible antes del primer contacto: la etiqueta de la dirección ocupa dos
+          // líneas ("Direccion" / "Matriz:") y no debe quedar pegada a la etiqueta del contacto
+          const firstContactY = starts[lastAddr + 1];
+          const above = labelCol
+            .filter((l) => l.y > firstContactY + 0.01)
+            .map((l) => l.y);
+          expect(Math.min(...above) - firstContactY).toBeGreaterThanOrEqual(11);
 
           // Y después viene lo de siempre: Contribuyente Especial u OBLIGADO A LLEVAR CONTABILIDAD
           expect(rows[lastAddr + 1 + n].label).toMatch(

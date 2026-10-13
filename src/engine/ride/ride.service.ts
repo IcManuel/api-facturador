@@ -314,6 +314,19 @@ export class RideService {
       const valueH = doc.font(FONT_NORMAL).fontSize(8).heightOfString(c.valor, { width: lInner - lLabelW });
       return Math.max(12, labelH, valueH) + 4;
     };
+    // La fila de la dirección reserva el alto de su valor, pero la etiqueta
+    // ("Direccion" / "Matriz:") ocupa dos líneas. Con una dirección corta la segunda
+    // línea de la etiqueta quedaría pegada al primer contacto: se completa ese espacio.
+    // Solo con contactos, para que el RIDE sin contactos no cambie.
+    let contactosTopGap = 0;
+    if (contactos.length && (data.dirMatriz || showSucursal)) {
+      const lastLabel = showSucursal ? 'Direccion\nSucursal:' : 'Direccion\nMatriz:';
+      const lastValue = showSucursal ? data.dirEstablecimiento! : data.dirMatriz;
+      const labelH = doc.font(FONT_BOLD).fontSize(8).heightOfString(lastLabel, { width: lLabelW });
+      const valueH = doc.font(FONT_NORMAL).fontSize(8).heightOfString(lastValue, { width: lInner - lLabelW });
+      contactosTopGap = Math.max(0, labelH + 4 - (Math.max(12, valueH) + 6));
+    }
+    if (contactos.length) compInfoH += contactosTopGap;
     for (const c of contactos) compInfoH += contactoRowH(c);
     if (data.contribuyenteEspecial) compInfoH += 16;
     compInfoH += 16; // obligado contab
@@ -479,6 +492,7 @@ export class RideService {
     }
 
     // Contactos del emisor
+    if (contactos.length) ly += contactosTopGap;
     for (const c of contactos) {
       const rowH = contactoRowH(c);
       doc.font(FONT_BOLD).fontSize(8);
