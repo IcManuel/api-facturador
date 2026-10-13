@@ -19,6 +19,7 @@ import { RideService, RideData } from '../ride/ride.service';
 import { CryptoService } from '../../common/services/crypto.service';
 import { MailService, CompanySender } from '../../common/services/mail.service';
 import { SmtpService } from '../../client/smtp/smtp.service';
+import { storedRideContactos } from '../../common/utils/ride-contactos.util';
 import { classifySriMessages, SriErrorAction } from '../sri/sri-errors';
 import { EventsGateway } from '../../events/events.gateway';
 import { NotificationService } from '../../notifications/notification.service';
@@ -1523,6 +1524,7 @@ export class DocumentProcessingService {
       contribuyenteRimpe: payload.contribuyenteRimpe || undefined,
       contribuyenteEspecial: payload.contribuyenteEspecial || undefined,
       agenteRetencion: payload.agenteRetencion || undefined,
+      contactosEmisor: storedRideContactos(company.rideContactos),
       brandFooter: company.account?.rideFooter || undefined,
 
       codDoc: doc.typeCode,

@@ -86,6 +86,10 @@ export class Company {
   @Column({ name: 'com_logo_s3_key', length: 500, nullable: true })
   logoS3Key: string;
 
+  /** Contactos del emisor que se imprimen en el RIDE, debajo de la dirección (solo RIDE, no XML). */
+  @Column({ name: 'com_ride_contactos', type: 'jsonb', nullable: true })
+  rideContactos: { nombre: string; valor: string }[] | null;
+
   @Column({ name: 'com_timezone', type: 'text', default: 'America/Guayaquil' })
   timezone: string;
 

@@ -18,6 +18,7 @@ import { UpdateEmissionPointDto } from '../../admin/companies/dto/update-emissio
 import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 import { UpdateCompanyInfoDto } from './dto/update-company-info.dto';
 import { UpdateCompanyRucDto } from './dto/update-company-ruc.dto';
+import { UpdateRideContactosDto } from './dto/update-ride-contactos.dto';
 import { imageFileFilter, resolveImageMime } from '../../common/utils/image-upload.util';
 import { CreateEstablishmentDto, UpdateEstablishmentDto } from '../../establishments/dto/establishment.dto';
 
@@ -178,6 +179,26 @@ export class InfoController {
   @ApiOperation({ summary: 'Eliminar el logo de la empresa' })
   deleteLogo(@CurrentCompany() company: Company) {
     return this.service.deleteLogo(company);
+  }
+
+  // ── Contactos del emisor en el RIDE ──
+
+  @Get('ride-contactos')
+  @ApiOperation({ summary: 'Contactos del emisor que se imprimen en el RIDE, debajo de la dirección' })
+  getRideContactos(@CurrentCompany() company: Company) {
+    return this.service.getRideContactos(company);
+  }
+
+  @Put('ride-contactos')
+  @ApiOperation({
+    summary: 'Guardar los contactos del emisor del RIDE',
+    description:
+      'Reemplaza la lista completa (máximo 6). Cada contacto: nombre ≤ 40 y valor ≤ 120 caracteres; ' +
+      'los saltos de línea y espacios repetidos se limpian. Lista vacía = quitar. Se imprimen en el ' +
+      'recuadro del emisor del RIDE de los próximos comprobantes. El XML no cambia.',
+  })
+  updateRideContactos(@CurrentCompany() company: Company, @Body() dto: UpdateRideContactosDto) {
+    return this.service.updateRideContactos(company, dto.contactos);
   }
 
   // ── Establecimientos ──

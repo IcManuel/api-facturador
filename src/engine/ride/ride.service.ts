@@ -59,6 +59,8 @@ export interface RideData {
   contribuyenteRimpe?: string;
   contribuyenteEspecial?: string;
   agenteRetencion?: string;
+  /** Contactos del emisor (teléfonos, correo...). Se imprimen bajo la dirección. Solo RIDE. */
+  contactosEmisor?: { nombre: string; valor: string }[];
 
   // Document
   codDoc: string;
@@ -304,6 +306,15 @@ export class RideService {
       const deH = doc.font(FONT_NORMAL).fontSize(8).heightOfString(data.dirEstablecimiento!, { width: lInner - lLabelW });
       compInfoH += Math.max(12, deH) + 6;
     }
+    // Contactos del emisor: misma fila "Etiqueta: valor" que las direcciones. El alto de
+    // cada fila es el mayor entre etiqueta y valor, para que nada se corte ni se monte.
+    const contactos = (data.contactosEmisor || []).filter((c) => c && c.nombre && c.valor);
+    const contactoRowH = (c: { nombre: string; valor: string }) => {
+      const labelH = doc.font(FONT_BOLD).fontSize(8).heightOfString(`${c.nombre}:`, { width: lLabelW - 4 });
+      const valueH = doc.font(FONT_NORMAL).fontSize(8).heightOfString(c.valor, { width: lInner - lLabelW });
+      return Math.max(12, labelH, valueH) + 4;
+    };
+    for (const c of contactos) compInfoH += contactoRowH(c);
     if (data.contribuyenteEspecial) compInfoH += 16;
     compInfoH += 16; // obligado contab
     if (data.agenteRetencion) compInfoH += 16;
@@ -465,6 +476,16 @@ export class RideService {
       doc.text(data.dirEstablecimiento!, x + lPad + lLabelW, ly, { width: lInner - lLabelW });
       const deH2 = doc.heightOfString(data.dirEstablecimiento!, { width: lInner - lLabelW });
       ly += Math.max(12, deH2) + 6;
+    }
+
+    // Contactos del emisor
+    for (const c of contactos) {
+      const rowH = contactoRowH(c);
+      doc.font(FONT_BOLD).fontSize(8);
+      doc.text(`${c.nombre}:`, x + lPad, ly, { width: lLabelW - 4 });
+      doc.font(FONT_NORMAL).fontSize(8);
+      doc.text(c.valor, x + lPad + lLabelW, ly, { width: lInner - lLabelW });
+      ly += rowH;
     }
 
     // Contribuyente Especial
@@ -664,22 +685,12 @@ export class RideService {
 
     // ── Info Adicional (left) ──
     const hasInfo = data.infoAdicional && data.infoAdicional.length > 0;
-    const infoH = hasInfo ? Math.max(totalsH, data.infoAdicional!.length * 13 + 24) : totalsH;
+    const infoRows = hasInfo ? this.infoAdicionalRowHeights(doc, data.infoAdicional!, leftW) : [];
+    const infoH = hasInfo ? Math.max(totalsH, this.sum(infoRows) + 24) : totalsH;
 
     if (hasInfo) {
       this.box(doc, x, y, leftW, infoH);
-
-      doc.font(FONT_BOLD).fontSize(7.5);
-      doc.text('Informacion Adicional', x + 6, y + 6, { width: leftW - 12 });
-
-      let iy = y + 20;
-      doc.fontSize(7);
-      const infoLabelW = 65;
-      for (const campo of data.infoAdicional!) {
-        doc.font(FONT_BOLD).text(`${campo.nombre}:`, x + 6, iy, { width: infoLabelW });
-        doc.font(FONT_NORMAL).text(campo.valor, x + 6 + infoLabelW, iy, { width: leftW - 12 - infoLabelW });
-        iy += 13;
-      }
+      this.drawInfoAdicional(doc, data.infoAdicional!, infoRows, x, y, leftW);
     }
 
     // ── Totals box (right) ──
@@ -935,22 +946,12 @@ export class RideService {
 
     // Left: Info Adicional
     const hasInfo = data.infoAdicional && data.infoAdicional.length > 0;
-    const infoH = hasInfo ? Math.max(totalsH, data.infoAdicional!.length * 13 + 24) : totalsH;
+    const infoRows = hasInfo ? this.infoAdicionalRowHeights(doc, data.infoAdicional!, leftW) : [];
+    const infoH = hasInfo ? Math.max(totalsH, this.sum(infoRows) + 24) : totalsH;
 
     if (hasInfo) {
       this.box(doc, x, y, leftW, infoH);
-
-      doc.font(FONT_BOLD).fontSize(7.5);
-      doc.text('Informacion Adicional', x + 6, y + 6, { width: leftW - 12 });
-
-      let iy = y + 20;
-      doc.fontSize(7);
-      const infoLabelW = 65;
-      for (const campo of data.infoAdicional!) {
-        doc.font(FONT_BOLD).text(`${campo.nombre}:`, x + 6, iy, { width: infoLabelW });
-        doc.font(FONT_NORMAL).text(campo.valor, x + 6 + infoLabelW, iy, { width: leftW - 12 - infoLabelW });
-        iy += 13;
-      }
+      this.drawInfoAdicional(doc, data.infoAdicional!, infoRows, x, y, leftW);
     }
 
     return y + Math.max(infoH, totalsH) + 8;
@@ -1361,7 +1362,8 @@ export class RideService {
     const hasInfo = data.infoAdicional && data.infoAdicional.length > 0;
     if (!hasInfo) return y;
 
-    const infoH = data.infoAdicional!.length * 13 + 24;
+    const infoRows = this.infoAdicionalRowHeights(doc, data.infoAdicional!, pw);
+    const infoH = this.sum(infoRows) + 24;
 
     if (y + infoH > doc.page.height - 30) {
       doc.addPage();
@@ -1369,20 +1371,48 @@ export class RideService {
     }
 
     this.box(doc, x, y, pw, infoH);
+    this.drawInfoAdicional(doc, data.infoAdicional!, infoRows, x, y, pw);
 
+    return y + infoH + 8;
+  }
+
+  // ── Información adicional (factura, notas, retención y guía) ──
+  private static readonly INFO_LABEL_W = 65;
+
+  /**
+   * Alto de cada fila de "Informacion Adicional". Una fila de una línea mide 13, como
+   * siempre; si la etiqueta o el valor ocupan varias líneas, la fila crece lo necesario
+   * para que la siguiente no se dibuje encima.
+   */
+  private infoAdicionalRowHeights(doc: PDFKit.PDFDocument, campos: { nombre: string; valor: string }[], boxW: number): number[] {
+    const labelW = RideService.INFO_LABEL_W;
+    const valueW = boxW - 12 - labelW;
+    return campos.map((campo) => {
+      const labelH = doc.font(FONT_BOLD).fontSize(7).heightOfString(`${campo.nombre}:`, { width: labelW });
+      const valueH = doc.font(FONT_NORMAL).fontSize(7).heightOfString(campo.valor ?? '', { width: valueW });
+      return Math.max(13, labelH + 4, valueH + 4);
+    });
+  }
+
+  private drawInfoAdicional(
+    doc: PDFKit.PDFDocument, campos: { nombre: string; valor: string }[], rowHeights: number[],
+    x: number, y: number, boxW: number,
+  ): void {
     doc.font(FONT_BOLD).fontSize(7.5);
-    doc.text('Informacion Adicional', x + 6, y + 6, { width: pw - 12 });
+    doc.text('Informacion Adicional', x + 6, y + 6, { width: boxW - 12 });
 
     let iy = y + 20;
     doc.fontSize(7);
-    const infoLabelW = 65;
-    for (const campo of data.infoAdicional!) {
-      doc.font(FONT_BOLD).text(`${campo.nombre}:`, x + 6, iy, { width: infoLabelW });
-      doc.font(FONT_NORMAL).text(campo.valor, x + 6 + infoLabelW, iy, { width: pw - 12 - infoLabelW });
-      iy += 13;
-    }
+    const labelW = RideService.INFO_LABEL_W;
+    campos.forEach((campo, i) => {
+      doc.font(FONT_BOLD).text(`${campo.nombre}:`, x + 6, iy, { width: labelW });
+      doc.font(FONT_NORMAL).text(campo.valor, x + 6 + labelW, iy, { width: boxW - 12 - labelW });
+      iy += rowHeights[i];
+    });
+  }
 
-    return y + infoH + 8;
+  private sum(values: number[]): number {
+    return values.reduce((a, b) => a + b, 0);
   }
 
   // ── Barcode generation (Code 128) ──

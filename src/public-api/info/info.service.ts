@@ -18,6 +18,7 @@ import { UpdateEmissionPointDto } from '../../admin/companies/dto/update-emissio
 import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 import { EstablishmentsService } from '../../establishments/establishments.service';
 import { CreateEstablishmentDto, UpdateEstablishmentDto } from '../../establishments/dto/establishment.dto';
+import { normalizeRideContactos, storedRideContactos } from '../../common/utils/ride-contactos.util';
 
 @Injectable()
 export class InfoService {
@@ -136,6 +137,24 @@ export class InfoService {
       await this.companyRepo.update(company.id, { logoS3Key: null as any });
     }
     return { message: 'Logo eliminado.' };
+  }
+
+  // ── Contactos del emisor en el RIDE ──
+
+  async getRideContactos(company: Company) {
+    const fresh = await this.companyRepo.findOne({ where: { id: company.id }, select: { id: true, rideContactos: true } });
+    return { contactos: storedRideContactos(fresh?.rideContactos) };
+  }
+
+  async updateRideContactos(company: Company, input: unknown) {
+    const contactos = normalizeRideContactos(input);
+    await this.companyRepo.update(company.id, { rideContactos: contactos.length ? contactos : null });
+    return {
+      contactos,
+      message: contactos.length
+        ? 'Contactos guardados. Aparecerán en el RIDE de los próximos comprobantes.'
+        : 'Contactos eliminados. Los próximos RIDE saldrán sin contactos.',
+    };
   }
 
   async getLogo(companyId: number): Promise<{ buffer: Buffer; contentType: string } | null> {
