@@ -545,27 +545,16 @@ export class RideService {
     const labelW = 195;
     const valX = x + pad + labelW;
     const valW = pw - pad * 2 - labelW;
-    const boxH = 56;
+    const rows: [string, string][] = [
+      ['Razon Social/Nombres y Apellidos:', data.razonSocialComprador],
+      ['Identificacion:', data.identificacionComprador],
+      ['Fecha Emision:', data.fechaEmision],
+    ];
+    const steps = this.labelValueSteps(doc, rows, labelW, valW);
+    const boxH = 56 + this.extraHeight(steps);
 
     this.box(doc, x, y, pw, boxH);
-
-    let by = y + 10;
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Razon Social/Nombres y Apellidos:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.razonSocialComprador, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Identificacion:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.identificacionComprador, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Emision:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.fechaEmision, valX, by, { width: valW });
+    this.drawLabelValueRows(doc, rows, steps, x + pad, valX, y + 10, labelW, valW);
 
     return y + boxH + 6;
   }
@@ -754,12 +743,16 @@ export class RideService {
     // Payment rows
     doc.font(FONT_NORMAL).fontSize(7);
     for (const pago of data.pagos) {
-      const payRowH = 14;
+      const payLabel = SRI_PAYMENT_METHODS[pago.formaPago] || pago.formaPago;
+      const payText = `${pago.formaPago}  ${payLabel}`;
+      // 14 si cabe en una línea, como siempre; si no (p. ej. forma 20, "OTROS CON
+      // UTILIZACION DEL SISTEMA FINANCIERO"), la fila crece para no cortar el texto.
+      const payTextH = doc.heightOfString(payText, { width: payCols[0].width - 6 });
+      const payRowH = Math.max(14, payTextH + 5.5);
       this.box(doc, x, y, payTableW, payRowH);
       px = x;
 
-      const payLabel = SRI_PAYMENT_METHODS[pago.formaPago] || pago.formaPago;
-      doc.text(`${pago.formaPago}  ${payLabel}`, px + 3, y + 3, { width: payCols[0].width - 6 });
+      doc.text(payText, px + 3, y + 3, { width: payCols[0].width - 6 });
       px += payCols[0].width;
       doc.moveTo(px, y).lineTo(px, y + payRowH).stroke();
       doc.text(pago.total.toFixed(2), px + 3, y + 3, { width: payCols[1].width - 6, align: 'right' });
@@ -832,27 +825,16 @@ export class RideService {
     const labelW = 220;
     const valX = x + pad + labelW;
     const valW = pw - pad * 2 - labelW;
-    const boxH = 56;
+    const rows: [string, string][] = [
+      ['Razon Social / Nombres y Apellidos:', data.razonSocialComprador],
+      ['Identificacion:', data.identificacionComprador],
+      ['Fecha Emision:', data.fechaEmision],
+    ];
+    const steps = this.labelValueSteps(doc, rows, labelW, valW);
+    const boxH = 56 + this.extraHeight(steps);
 
     this.box(doc, x, y, pw, boxH);
-
-    let by = y + 10;
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Razon Social / Nombres y Apellidos:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.razonSocialComprador, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Identificacion:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.identificacionComprador, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Emision:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.fechaEmision, valX, by, { width: valW });
+    this.drawLabelValueRows(doc, rows, steps, x + pad, valX, y + 10, labelW, valW);
 
     return y + boxH + 6;
   }
@@ -894,16 +876,6 @@ export class RideService {
     doc.font(FONT_NORMAL).fontSize(6.5);
     const impuestos = data.impuestosRetencion || [];
     for (const imp of impuestos) {
-      const rowH = 16;
-
-      if (y + rowH > doc.page.height - 80) {
-        doc.addPage();
-        y = PAGE_MT;
-      }
-
-      this.box(doc, x, y, pw, rowH);
-
-      cx = x;
       const docSustentoLabel = DOC_SUSTENTO_LABELS[imp.codDocSustento] || imp.codDocSustento;
       const impLabel = RETENTION_TAX_LABELS[imp.codigo] || imp.codigo;
 
@@ -917,6 +889,22 @@ export class RideService {
         `${imp.porcentajeRetener.toFixed(2)}%`,
         imp.valorRetenido.toFixed(2),
       ];
+
+      // Alto de la fila: 16 si todo cabe en una línea; si una celda ocupa varias
+      // (p. ej. "LIQUIDACION DE COMPRAS"), la fila crece para no cortarla.
+      const tallest = Math.max(
+        ...cellData.map((t, i) => doc.heightOfString(t || ' ', { width: cols[i].width - 4 })),
+      );
+      const rowH = Math.max(16, tallest + 8);
+
+      if (y + rowH > doc.page.height - 80) {
+        doc.addPage();
+        y = PAGE_MT;
+      }
+
+      this.box(doc, x, y, pw, rowH);
+
+      cx = x;
 
       for (let i = 0; i < cols.length; i++) {
         if (i > 0) {
@@ -981,54 +969,21 @@ export class RideService {
     const valX = x + pad + labelW;
     const valW = pw - pad * 2 - labelW;
 
-    // Calculate box height: 6 rows × 16 + padding
-    const boxH = 6 * 16 + 16;
+    const docModLabel = DOC_TYPE_LABELS[data.codDocModificado || '01'] || 'DOCUMENTO';
+    const rows: [string, string][] = [
+      ['Razon Social / Nombres y Apellidos:', data.razonSocialComprador],
+      ['Identificacion:', data.identificacionComprador],
+      ['Fecha Emision:', data.fechaEmision],
+      ['Comprobante que se modifica:', `${docModLabel}   ${data.numDocModificado || ''}`],
+      ['Fecha Emision (Comprobante a modificar):', data.fechaEmisionDocSustento || ''],
+      ['Razon de Modificacion:', data.motivo || ''],
+    ];
+    const steps = this.labelValueSteps(doc, rows, labelW, valW);
+    // 6 filas × 16 + márgenes; crece si alguna fila ocupa varias líneas
+    const boxH = 6 * 16 + 16 + this.extraHeight(steps);
 
     this.box(doc, x, y, pw, boxH);
-
-    let by = y + 8;
-
-    // Razón Social
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Razon Social / Nombres y Apellidos:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.razonSocialComprador, valX, by, { width: valW });
-    by += 16;
-
-    // Identificación
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Identificacion:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.identificacionComprador, valX, by, { width: valW });
-    by += 16;
-
-    // Fecha Emisión
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Emision:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.fechaEmision, valX, by, { width: valW });
-    by += 16;
-
-    // Comprobante que se modifica
-    const docModLabel = DOC_TYPE_LABELS[data.codDocModificado || '01'] || 'DOCUMENTO';
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Comprobante que se modifica:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(`${docModLabel}   ${data.numDocModificado || ''}`, valX, by, { width: valW });
-    by += 16;
-
-    // Fecha Emisión (Comprobante a modificar)
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Emision (Comprobante a modificar):', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.fechaEmisionDocSustento || '', valX, by, { width: valW });
-    by += 16;
-
-    // Razón de Modificación
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Razon de Modificacion:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.motivo || '', valX, by, { width: valW });
+    this.drawLabelValueRows(doc, rows, steps, x + pad, valX, y + 8, labelW, valW);
 
     return y + boxH + 6;
   }
@@ -1052,46 +1007,19 @@ export class RideService {
     const valX = x + pad + labelW;
     const valW = pw - pad * 2 - labelW;
 
-    const boxH = 6 * 16 + 16;
-    this.box(doc, x, y, pw, boxH);
-
-    let by = y + 8;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Razon Social / Nombres y Apellidos:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.razonSocialComprador, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Identificacion:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.identificacionComprador, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Emision:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.fechaEmision, valX, by, { width: valW });
-    by += 16;
-
     const docModLabel = DOC_TYPE_LABELS[data.codDocModificado || '01'] || 'DOCUMENTO';
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Comprobante que se modifica:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(`${docModLabel}   ${data.numDocModificado || ''}`, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Emision (Comprobante a modificar):', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.fechaEmisionDocSustento || '', valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Valor Total:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text((data.valorModificacion ?? 0).toFixed(2), valX, by, { width: valW });
+    const rows: [string, string][] = [
+      ['Razon Social / Nombres y Apellidos:', data.razonSocialComprador],
+      ['Identificacion:', data.identificacionComprador],
+      ['Fecha Emision:', data.fechaEmision],
+      ['Comprobante que se modifica:', `${docModLabel}   ${data.numDocModificado || ''}`],
+      ['Fecha Emision (Comprobante a modificar):', data.fechaEmisionDocSustento || ''],
+      ['Valor Total:', (data.valorModificacion ?? 0).toFixed(2)],
+    ];
+    const steps = this.labelValueSteps(doc, rows, labelW, valW);
+    const boxH = 6 * 16 + 16 + this.extraHeight(steps);
+    this.box(doc, x, y, pw, boxH);
+    this.drawLabelValueRows(doc, rows, steps, x + pad, valX, y + 8, labelW, valW);
 
     return y + boxH + 6;
   }
@@ -1173,57 +1101,20 @@ export class RideService {
     const valX = x + pad + labelW;
     const valW = pw - pad * 2 - labelW;
 
-    const boxH = 8 * 16 + 16;
+    const rows: [string, string][] = [
+      ['Direccion Partida:', gr.dirPartida],
+      ['Razon Social / Nombres Transportista:', gr.razonSocialTransportista],
+      ['RUC / CI Transportista:', gr.rucTransportista],
+      ['Placa:', gr.placa],
+      ['Fecha Inicio Transporte:', gr.fechaIniTransporte],
+      ['Fecha Fin Transporte:', gr.fechaFinTransporte],
+      ['Fecha Emision:', data.fechaEmision],
+      ['Punto de Partida:', gr.dirPartida],
+    ];
+    const steps = this.labelValueSteps(doc, rows, labelW, valW);
+    const boxH = 8 * 16 + 16 + this.extraHeight(steps);
     this.box(doc, x, y, pw, boxH);
-
-    let by = y + 8;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Direccion Partida:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(gr.dirPartida, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Razon Social / Nombres Transportista:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(gr.razonSocialTransportista, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('RUC / CI Transportista:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(gr.rucTransportista, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Placa:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(gr.placa, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Inicio Transporte:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(gr.fechaIniTransporte, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Fin Transporte:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(gr.fechaFinTransporte, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Fecha Emision:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(data.fechaEmision, valX, by, { width: valW });
-    by += 16;
-
-    doc.font(FONT_BOLD).fontSize(8);
-    doc.text('Punto de Partida:', x + pad, by, { width: labelW });
-    doc.font(FONT_NORMAL).fontSize(8);
-    doc.text(gr.dirPartida, valX, by, { width: valW });
+    this.drawLabelValueRows(doc, rows, steps, x + pad, valX, y + 8, labelW, valW);
 
     return y + boxH + 6;
   }
@@ -1245,11 +1136,24 @@ export class RideService {
       const valX = x + pad + labelW;
       const valW = pw - pad * 2 - labelW;
 
+      const rows: [string, string][] = [
+        ['Identificacion Destinatario:', dest.identificacionDestinatario],
+        ['Razon Social Destinatario:', dest.razonSocialDestinatario],
+        ['Direccion Destinatario:', dest.dirDestinatario],
+        ['Motivo Traslado:', dest.motivoTraslado],
+      ];
+      if (dest.codDocSustento) {
+        const docLabel = DOC_SUSTENTO_LABELS[dest.codDocSustento] || dest.codDocSustento;
+        rows.push(['Documento Sustento:', `${docLabel}   ${dest.numDocSustento || ''}`]);
+      }
+      if (dest.ruta) rows.push(['Ruta:', dest.ruta]);
+      const steps = this.labelValueSteps(doc, rows, labelW, valW);
+
       let rowCount = 4; // base rows: identificacion, razonSocial, dirDestinatario, motivoTraslado
       if (dest.codDocSustento) rowCount++;
       if (dest.numDocSustento) rowCount++;
       if (dest.ruta) rowCount++;
-      const destBoxH = rowCount * 16 + 16;
+      const destBoxH = rowCount * 16 + 16 + this.extraHeight(steps);
 
       if (y + destBoxH > doc.page.height - 80) {
         doc.addPage();
@@ -1257,49 +1161,7 @@ export class RideService {
       }
 
       this.box(doc, x, y, pw, destBoxH);
-
-      let by = y + 8;
-
-      doc.font(FONT_BOLD).fontSize(8);
-      doc.text('Identificacion Destinatario:', x + pad, by, { width: labelW });
-      doc.font(FONT_NORMAL).fontSize(8);
-      doc.text(dest.identificacionDestinatario, valX, by, { width: valW });
-      by += 16;
-
-      doc.font(FONT_BOLD).fontSize(8);
-      doc.text('Razon Social Destinatario:', x + pad, by, { width: labelW });
-      doc.font(FONT_NORMAL).fontSize(8);
-      doc.text(dest.razonSocialDestinatario, valX, by, { width: valW });
-      by += 16;
-
-      doc.font(FONT_BOLD).fontSize(8);
-      doc.text('Direccion Destinatario:', x + pad, by, { width: labelW });
-      doc.font(FONT_NORMAL).fontSize(8);
-      doc.text(dest.dirDestinatario, valX, by, { width: valW });
-      by += 16;
-
-      doc.font(FONT_BOLD).fontSize(8);
-      doc.text('Motivo Traslado:', x + pad, by, { width: labelW });
-      doc.font(FONT_NORMAL).fontSize(8);
-      doc.text(dest.motivoTraslado, valX, by, { width: valW });
-      by += 16;
-
-      if (dest.codDocSustento) {
-        const docLabel = DOC_SUSTENTO_LABELS[dest.codDocSustento] || dest.codDocSustento;
-        doc.font(FONT_BOLD).fontSize(8);
-        doc.text('Documento Sustento:', x + pad, by, { width: labelW });
-        doc.font(FONT_NORMAL).fontSize(8);
-        doc.text(`${docLabel}   ${dest.numDocSustento || ''}`, valX, by, { width: valW });
-        by += 16;
-      }
-
-      if (dest.ruta) {
-        doc.font(FONT_BOLD).fontSize(8);
-        doc.text('Ruta:', x + pad, by, { width: labelW });
-        doc.font(FONT_NORMAL).fontSize(8);
-        doc.text(dest.ruta, valX, by, { width: valW });
-        by += 16;
-      }
+      this.drawLabelValueRows(doc, rows, steps, x + pad, valX, y + 8, labelW, valW);
 
       y += destBoxH + 4;
 
@@ -1332,7 +1194,8 @@ export class RideService {
       for (const det of dest.detalles) {
         const descColWidth = cols[1].width - 6;
         const descHeight = doc.heightOfString(det.descripcion, { width: descColWidth });
-        const rowH = Math.max(16, descHeight + 6);
+        const codeHeight = doc.heightOfString(det.codigoInterno || ' ', { width: cols[0].width - 6 });
+        const rowH = Math.max(16, descHeight + 6, codeHeight + 6);
 
         if (y + rowH > doc.page.height - 80) {
           doc.addPage();
@@ -1388,6 +1251,41 @@ export class RideService {
     this.drawInfoAdicional(doc, data.infoAdicional!, infoRows, x, y, pw);
 
     return y + infoH + 8;
+  }
+
+  // ── Filas "Etiqueta: valor" de los recuadros (comprador, notas, guía) ──
+  /**
+   * Alto de cada fila "Etiqueta: valor" a 8 pt. Una fila de una línea mide 16, como
+   * siempre; si la etiqueta o el valor ocupan varias líneas, la fila crece lo necesario.
+   */
+  private labelValueSteps(
+    doc: PDFKit.PDFDocument, rows: [string, string][], labelW: number, valueW: number,
+  ): number[] {
+    return rows.map(([label, value]) => {
+      const labelH = doc.font(FONT_BOLD).fontSize(8).heightOfString(label, { width: labelW });
+      const valueH = doc.font(FONT_NORMAL).fontSize(8).heightOfString(value || ' ', { width: valueW });
+      return Math.max(16, Math.max(labelH, valueH) + 6);
+    });
+  }
+
+  /** Lo que crecen las filas respecto del alto fijo de 16. */
+  private extraHeight(steps: number[]): number {
+    return this.sum(steps) - 16 * steps.length;
+  }
+
+  /** Dibuja las filas con el mismo estilo de siempre (etiqueta en negrita, valor normal). */
+  private drawLabelValueRows(
+    doc: PDFKit.PDFDocument, rows: [string, string][], steps: number[],
+    labelX: number, valX: number, startY: number, labelW: number, valueW: number,
+  ): void {
+    let by = startY;
+    rows.forEach(([label, value], i) => {
+      doc.font(FONT_BOLD).fontSize(8);
+      doc.text(label, labelX, by, { width: labelW });
+      doc.font(FONT_NORMAL).fontSize(8);
+      doc.text(value, valX, by, { width: valueW });
+      by += steps[i];
+    });
   }
 
   // ── Información adicional (factura, notas, retención y guía) ──

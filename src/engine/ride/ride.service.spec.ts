@@ -531,4 +531,112 @@ describe('RIDE — encabezado del emisor', () => {
       });
     }
   });
+
+  describe('textos largos: ninguna fila se corta ni se monta (todas las tablas y recuadros)', () => {
+    const PAGE_H = 841.89;
+    const LARGO =
+      'COMERCIALIZADORA E IMPORTADORA DE REPUESTOS Y ACCESORIOS PARA EQUIPOS ELECTRONICOS Y DE TELECOMUNICACIONES DEL AUSTRO CIA. LTDA.';
+
+    function longData(codDoc: string): RideData {
+      const data = baseData(codDoc, { short: true });
+      data.razonSocialComprador = LARGO;
+      data.pagos = [
+        { formaPago: '20', total: 30, plazo: 30, unidadTiempo: 'dias' },
+        { formaPago: '01', total: 16 },
+      ];
+      data.motivo =
+        'Devolución parcial de mercadería por fallas de fábrica detectadas en la revisión técnica posterior a la entrega del pedido completo';
+      if (codDoc === '07') {
+        data.impuestosRetencion![0].codDocSustento = '03'; // LIQUIDACION DE COMPRAS
+      }
+      if (codDoc === '06') {
+        const gr = data.guiaRemisionData!;
+        gr.dirPartida =
+          'AV. DANIEL LEON BORJA Y DUCHICELA, JUNTO AL CENTRO COMERCIAL PASEO SHOPPING, BODEGA 14, RIOBAMBA, CHIMBORAZO';
+        gr.razonSocialTransportista = LARGO;
+        const d = gr.destinatarios[0];
+        d.razonSocialDestinatario = LARGO;
+        d.dirDestinatario =
+          'CALLE BOLIVAR 14-22 ENTRE SUCRE Y GARCIA MORENO, CENTRO COMERCIAL EL PASEO, LOCAL 45, PLANTA BAJA, QUITO';
+        d.motivoTraslado =
+          'Entrega de equipos reparados y devolución de repuestos sobrantes al cliente, según orden de servicio';
+        d.ruta =
+          'Riobamba - Ambato - Latacunga - Quito, por la Panamericana Norte con parada en bodega de Ambato';
+        d.codDocSustento = '01';
+        d.numDocSustento = '001-001-000012000';
+        d.detalles[0].codigoInterno = 'REP-PANTALLA-SAMSUNG-A54-ORIG';
+      }
+      return data;
+    }
+
+    for (const codDoc of DOC_TYPES) {
+      it(`comprobante ${codDoc}: todas las líneas dentro de su recuadro y sin montarse`, async () => {
+        const service = new RideService() as any;
+        const boxes: number[][] = [];
+        const realBox = service.box.bind(service);
+        service.box = (
+          doc: any,
+          x: number,
+          y: number,
+          w: number,
+          h: number,
+        ) => {
+          boxes.push([x, y, w, h]);
+          return realBox(doc, x, y, w, h);
+        };
+        const lines = extractText(await service.generate(longData(codDoc)))
+          .map((t) => {
+            const sp = t.indexOf(' ');
+            const [x, y] = t.slice(0, sp).split(',').map(Number);
+            return { x, y, s: t.slice(sp + 1) };
+          })
+          .filter((l) => l.y > 30); // pie de marca, fuera de los recuadros
+
+        // Cada línea pertenece al recuadro más cercano por encima de ella y queda dentro
+        for (const l of lines) {
+          const owners = boxes
+            .filter(([bx, , bw]) => l.x >= bx - 0.5 && l.x < bx + bw)
+            .filter(([, by]) => PAGE_H - by >= l.y)
+            .sort((a, b) => PAGE_H - a[1] - (PAGE_H - b[1]));
+          const owner = owners[0];
+          expect(owner).toBeDefined();
+          const bottom = PAGE_H - (owner[1] + owner[3]);
+          if (!(l.y > bottom + 1)) {
+            throw new Error(
+              `"${l.s}" (y=${l.y}) se sale de su recuadro (borde inferior y=${bottom.toFixed(2)})`,
+            );
+          }
+        }
+
+        // En una misma columna, dos líneas distintas no pueden estar a menos de 7 puntos
+        const byX = new Map<number, typeof lines>();
+        for (const l of lines) {
+          const k = Math.round(l.x * 10) / 10;
+          byX.set(k, [...(byX.get(k) || []), l]);
+        }
+        for (const col of byX.values()) {
+          const sorted = [...col].sort((a, b) => b.y - a.y);
+          for (let i = 1; i < sorted.length; i++) {
+            const dy = sorted[i - 1].y - sorted[i].y;
+            if (dy < 7) {
+              throw new Error(
+                `"${sorted[i - 1].s}" y "${sorted[i].s}" se montan (separación ${dy.toFixed(2)})`,
+              );
+            }
+          }
+        }
+
+        // El texto largo se imprimió completo (no quedó cortado ni tapado)
+        const all = lines
+          .map((l) => l.s)
+          .join(' ')
+          .replace(/\s+/g, '');
+        // las retenciones y las guías no tienen forma de pago
+        if (!['06', '07'].includes(codDoc)) {
+          expect(all).toContain('20OTROSCONUTILIZACIONDELSISTEMAFINANCIERO');
+        }
+        expect(all).toContain(LARGO.replace(/\s+/g, ''));
+      });
+    }
+  });
 });
