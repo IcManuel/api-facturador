@@ -24,6 +24,9 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   '07': 'Retención',
 };
 
+import { CobroUsoService } from '../../cobro/cobro-uso.service';
+import { currentCycle, ymd } from '../../cobro/cobro.calendar';
+
 @Injectable()
 export class ClientDashboardService {
   constructor(
@@ -37,7 +40,35 @@ export class ClientDashboardService {
     private readonly certificateRepo: Repository<Certificate>,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
+    private readonly cobroUso: CobroUsoService,
   ) {}
+
+  /**
+   * Lo que se cobraría al cerrar el ciclo vigente (mismo motor del cierre, IVA incluido),
+   * con la forma que ya usa el dashboard.
+   */
+  private async estimacionCiclo(accountId: number, companyId: number) {
+    const account = await this.accountRepo.findOne({ where: { id: accountId } });
+    if (!account) return null;
+    const { start, end } = currentCycle(new Date(), account.billingCycleDay);
+    const hoy = new Date();
+    const manana = ymd(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1));
+    const hasta = ymd(end);
+    const cobro = await this.cobroUso.cobro(account, ymd(start), manana < hasta ? manana : hasta);
+    const linea = cobro.lineas.find((l) => l.companyId === companyId);
+    return {
+      total: cobro.total,
+      subtotal: cobro.subtotal,
+      iva: cobro.iva,
+      ivaIncluido: true,
+      basePrice: cobro.baseTotal,
+      overageDocs: cobro.overageDocs,
+      overageTotal: cobro.overageTotal,
+      docLimit: linea?.docLimit ?? null,
+      cycleStart: ymd(start),
+      cycleEnd: hasta,
+    };
+  }
 
   async getDashboard(accountId: number, companyId: number) {
     const company = await this.companyRepo.findOne({
@@ -94,7 +125,7 @@ export class ClientDashboardService {
           createdAt: Between(monthStart, monthEnd),
         },
       }),
-      this.billingRepo.findOne({ where: { accountId, year, month } }),
+      this.estimacionCiclo(accountId, companyId),
       this.certificateRepo.findOne({
         where: { companyId, isCurrent: true },
         order: { uploadedAt: 'DESC' },

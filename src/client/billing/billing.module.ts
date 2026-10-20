@@ -8,10 +8,12 @@ import { Document } from '../../entities/document.entity';
 import { Account } from '../../entities/account.entity';
 import { ClientBillingController } from './billing.controller';
 import { ClientBillingService } from './billing.service';
+import { CobroModule } from '../../cobro/cobro.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([BillingPeriod, BillingCompanyDetail, Payment, Company, Document, Account]),
+    CobroModule,
   ],
   controllers: [ClientBillingController],
   providers: [ClientBillingService],

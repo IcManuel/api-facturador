@@ -9,13 +9,16 @@ import { BillingCron } from './billing.cron';
 import { CollectionsReportCron } from './collections-report.cron';
 import { NotificationsModule } from '../../notifications/notifications.module';
 import { RedisLockService } from '../../common/services/redis-lock.service';
+import { CobroModule } from '../../cobro/cobro.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([BillingPeriod, Payment, Account]),
     NotificationsModule,
+    CobroModule,
   ],
   controllers: [BillingController],
   providers: [BillingService, BillingCron, CollectionsReportCron, RedisLockService],
+  exports: [BillingService],
 })
 export class BillingModule {}

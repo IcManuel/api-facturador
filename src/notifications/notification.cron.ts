@@ -95,7 +95,11 @@ export class NotificationCron {
    *  - Cumplidos esos 5 días sin pago: se avisa a administración con la lista
    *    de cuentas a bloquear. El bloqueo es manual, no automático.
    */
-  @Cron('0 15 * * *')
+  /**
+   * RETIRADO el 19-oct-2026: lo reemplaza la cobranza automática (pagos/cobranza.cron.ts), con
+   * el calendario cierre +5 / +10 / +20 y bloqueo automático. Se conserva sin @Cron por si hay
+   * que volver atrás.
+   */
   async handleOverduePayments(): Promise<void> {
     const acquired = await this.redisLock.acquire('notification-overdue', 300);
     if (!acquired) return;
@@ -213,6 +217,8 @@ export class NotificationCron {
 
       for (const account of expired) {
         account.status = AccountStatus.BLOCKED;
+        // Al entrar al panel podrá activarla pagando el primer mes (PagoPlux)
+        account.blockedReason = 'demo';
         await this.accountRepo.save(account);
         this.logger.log(`Trial expired — blocked account ${account.id} (${account.name})`);
       }

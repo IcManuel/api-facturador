@@ -22,6 +22,7 @@ import { ClientUsersModule } from './client/users/users.module';
 import { ClientDashboardModule } from './client/dashboard/dashboard.module';
 import { ClientBillingModule } from './client/billing/billing.module';
 import { ClientSmtpModule } from './client/smtp/smtp.module';
+import { PagosModule } from './pagos/pagos.module';
 import { PublicApiModule } from './public-api/public-api.module';
 import { EngineModule } from './engine/engine.module';
 import { QueuesModule } from './queues/queues.module';
@@ -57,6 +58,7 @@ import { StatusModule } from './status/status.module';
     ClientDashboardModule,
     ClientBillingModule,
     ClientSmtpModule,
+    PagosModule,
     // Public API + Engine
     PublicApiModule,
     EngineModule,

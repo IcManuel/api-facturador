@@ -11,6 +11,12 @@ import { AccountUser } from './account-user.entity';
 import { Company } from './company.entity';
 import { BillingPeriod } from './billing-period.entity';
 
+/** Tarifa de integrador: precio por empresa activa según tramos, más un valor por documento. */
+export interface IntegratorPricingJson {
+  tramos: { hasta: number | null; precio: number }[];
+  porDocumento: number;
+}
+
 @Entity({ schema: 'app', name: 'account' })
 export class Account {
   @PrimaryGeneratedColumn({ name: 'acc_id' })
@@ -51,6 +57,18 @@ export class Account {
 
   @Column({ name: 'acc_is_internal', type: 'boolean', default: false })
   isInternal: boolean;
+
+  /** Tarifa propia de integrador por empresa activa (ver cobro.calculator). */
+  @Column({ name: 'acc_integrator_pricing', type: 'jsonb', nullable: true })
+  integratorPricing: IntegratorPricingJson | null;
+
+  /** Por qué está bloqueada: 'mora' | 'demo' | 'manual'. NULL en bloqueos anteriores al 020. */
+  @Column({ name: 'acc_blocked_reason', type: 'varchar', length: 20, nullable: true })
+  blockedReason: string | null;
+
+  /** 'panel': deuda vencida; el panel solo deja pagar, la API sigue emitiendo. */
+  @Column({ name: 'acc_payment_lock', type: 'varchar', length: 10, nullable: true })
+  paymentLock: string | null;
 
   @Column({ name: 'acc_api_key', type: 'varchar', length: 100, unique: true, nullable: true })
   apiKey: string | null;

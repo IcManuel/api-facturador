@@ -92,7 +92,17 @@ export class AccountsService {
     const previousWarning = account.warningMessage;
     const wasActive = account.isActive;
 
+    const previousStatus = account.status;
     Object.assign(account, dto);
+    // Cambio de estado hecho por administración: bloqueo manual (no se levanta pagando) o
+    // reactivación (limpia cualquier bloqueo por mora o por la demo)
+    if (dto.status && dto.status !== previousStatus) {
+      if (dto.status === AccountStatus.BLOCKED) account.blockedReason = 'manual';
+      if (dto.status === AccountStatus.ACTIVE || dto.status === AccountStatus.TRIAL) {
+        account.blockedReason = null;
+        account.paymentLock = null;
+      }
+    }
     const saved = await this.repo.save(account);
 
     // Load companies for notification recipients
@@ -198,6 +208,8 @@ export class AccountsService {
     // next payment lands exactly one month from the activation date.
     // Cap to 28 to avoid gaps in short months (Feb).
     account.billingCycleDay = Math.min(new Date().getDate(), 28);
+    account.blockedReason = null;
+    account.paymentLock = null;
     return this.repo.save(account);
   }
 
@@ -352,6 +364,8 @@ export class AccountsService {
         : now;
     account.trialEndsAt = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
     account.status = AccountStatus.TRIAL;
+    account.blockedReason = null;
+    account.paymentLock = null;
     return this.repo.save(account);
   }
 }

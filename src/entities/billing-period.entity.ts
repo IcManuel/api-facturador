@@ -60,6 +60,27 @@ export class BillingPeriod {
   @Column({ name: 'bpe_total', type: 'numeric', precision: 10, scale: 2, default: 0 })
   total: number;
 
+  /** Total sin IVA (los precios son con IVA incluido: subtotal = total / 1,15). */
+  @Column({ name: 'bpe_subtotal', type: 'numeric', precision: 10, scale: 2, default: 0 })
+  subtotal: number;
+
+  @Column({ name: 'bpe_iva_rate', type: 'numeric', precision: 5, scale: 2, default: 15 })
+  ivaRate: number;
+
+  @Column({ name: 'bpe_iva', type: 'numeric', precision: 10, scale: 2, default: 0 })
+  iva: number;
+
+  /** Vencimiento = cierre + 5 días. */
+  @Column({ name: 'bpe_due_date', type: 'date', nullable: true })
+  dueDate: string | null;
+
+  /** NULL = período abierto (primer mes pagado al activar la cuenta). */
+  @Column({ name: 'bpe_closed_at', type: 'timestamptz', nullable: true })
+  closedAt: Date | null;
+
+  @Column({ name: 'bpe_prepaid', type: 'boolean', default: false })
+  prepaid: boolean;
+
   @Column({ name: 'bpe_status', type: 'enum', enum: BillingStatus, enumName: 'billing_status', default: BillingStatus.PENDING })
   status: BillingStatus;
 

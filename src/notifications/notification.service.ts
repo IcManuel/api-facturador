@@ -55,11 +55,22 @@ export interface BillingInvoiceData {
   companyEmails: { email: string | null; notificationEmail: string | null }[];
   year: number;
   month: number;
+  periodStart?: string | null;
+  periodEnd?: string | null;
   docsTotal: number;
+  docsAuthorized?: number;
   basePrice: number;
   overageDocs: number;
   overageTotal: number;
+  /** Total con IVA incluido. */
   total: number;
+  subtotal?: number;
+  iva?: number;
+  ivaRate?: number;
+  /** Saldo a pagar (puede ser menor que el total si el primer mes ya se pagó). */
+  balance?: number;
+  dueDate?: string | null;
+  lineas?: { name: string; planName: string; docsAuthorized: number; base: number; overageDocs: number; overageTotal: number; total: number }[];
 }
 
 export interface NewTrialRegistrationData {
@@ -281,45 +292,61 @@ export class NotificationService {
 
   async sendBillingInvoice(data: BillingInvoiceData): Promise<void> {
     const monthNames = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-    const period = `${monthNames[data.month]} ${data.year}`;
+    const fecha = (s?: string | null) => (s ? s.slice(0, 10).split('-').reverse().join('/') : '');
+    const period = data.periodStart && data.periodEnd
+      ? `${fecha(data.periodStart)} al ${fecha(data.periodEnd)}`
+      : `${monthNames[data.month]} ${data.year}`;
+    const money = (n: number) => `$${Number(n).toFixed(2)}`;
+    const balance = data.balance ?? data.total;
+    const payUrl = `${this.config.get('FRONTEND_URL', 'https://panel.autorizadorec.com')}/client/billing?pagar=1`;
+    const td = 'padding:8px 12px;border:1px solid #e9ecef';
+    const th = `${td};background:#f8f9fa;font-weight:600`;
+
+    const filas = (data.lineas ?? []).map((l) => `
+        <tr>
+          <td style="${td}">${l.name}<br><span style="color:#888;font-size:11px">${l.planName}</span></td>
+          <td style="${td};text-align:right">${l.docsAuthorized}</td>
+          <td style="${td};text-align:right">${money(l.base)}</td>
+          <td style="${td};text-align:right">${l.overageDocs > 0 ? `${l.overageDocs} · ${money(l.overageTotal)}` : '—'}</td>
+          <td style="${td};text-align:right;font-weight:600">${money(l.total)}</td>
+        </tr>`).join('');
 
     const html = this.wrap(`
-      <h2 style="color:#1a1a2e;margin-bottom:8px">Factura de Cobro Generada</h2>
+      <h2 style="color:#1a1a2e;margin-bottom:8px">Su cobro del período</h2>
       <p style="color:#555;font-size:14px">
-        Se ha generado la factura de cobro para la cuenta <strong>${data.accountName}</strong>
-        correspondiente al período <strong>${period}</strong>.
+        Cerramos el período <strong>${period}</strong> de la cuenta <strong>${data.accountName}</strong>.
       </p>
+      ${filas ? `
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:12px">
+        <tr>
+          <td style="${th}">Empresa</td><td style="${th};text-align:right">Autorizados</td>
+          <td style="${th};text-align:right">Cuota</td><td style="${th};text-align:right">Extras</td>
+          <td style="${th};text-align:right">Total</td>
+        </tr>
+        ${filas}
+      </table>` : ''}
       <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
+        ${data.subtotal !== undefined ? `
+        <tr><td style="${th};width:55%">Subtotal</td><td style="${td};text-align:right">${money(data.subtotal)}</td></tr>
+        <tr><td style="${th}">IVA ${data.ivaRate ?? 15}%</td><td style="${td};text-align:right">${money(data.iva ?? 0)}</td></tr>` : ''}
+        <tr><td style="${th}">Total (IVA incluido)</td><td style="${td};text-align:right">${money(data.total)}</td></tr>
+        ${balance !== data.total ? `<tr><td style="${th}">Ya pagado</td><td style="${td};text-align:right">${money(data.total - balance)}</td></tr>` : ''}
         <tr>
-          <td style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;font-weight:600;width:45%">Período</td>
-          <td style="padding:8px 12px;border:1px solid #e9ecef">${period}</td>
-        </tr>
-        <tr>
-          <td style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;font-weight:600">Documentos Emitidos</td>
-          <td style="padding:8px 12px;border:1px solid #e9ecef">${data.docsTotal}</td>
-        </tr>
-        <tr>
-          <td style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;font-weight:600">Precio Base</td>
-          <td style="padding:8px 12px;border:1px solid #e9ecef">$${data.basePrice.toFixed(2)}</td>
-        </tr>
-        ${data.overageDocs > 0 ? `
-        <tr>
-          <td style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;font-weight:600">Documentos Extra</td>
-          <td style="padding:8px 12px;border:1px solid #e9ecef">${data.overageDocs}</td>
-        </tr>
-        <tr>
-          <td style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;font-weight:600">Total Extras</td>
-          <td style="padding:8px 12px;border:1px solid #e9ecef">$${data.overageTotal.toFixed(2)}</td>
-        </tr>` : ''}
-        <tr>
-          <td style="padding:8px 12px;background:#1a1a2e;color:#fff;border:1px solid #e9ecef;font-weight:600;font-size:15px">TOTAL</td>
-          <td style="padding:8px 12px;background:#1a1a2e;color:#fff;border:1px solid #e9ecef;font-weight:600;font-size:15px">$${data.total.toFixed(2)}</td>
+          <td style="${td};background:#1a1a2e;color:#fff;font-weight:600;font-size:15px">A PAGAR</td>
+          <td style="${td};background:#1a1a2e;color:#fff;font-weight:600;font-size:15px;text-align:right">${money(balance)}</td>
         </tr>
       </table>
+      ${data.dueDate ? `<p style="color:#555;font-size:13px">Fecha límite de pago: <strong>${fecha(data.dueDate)}</strong>.</p>` : ''}
+      <div style="text-align:center;margin:24px 0">
+        <a href="${payUrl}" style="display:inline-block;padding:12px 32px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px">Pagar ahora</a>
+      </div>
+      <p style="color:#888;font-size:12px">
+        Puede pagar con tarjeta de crédito o débito desde su panel. Si ya realizó el pago, ignore este mensaje.
+      </p>
     `);
 
     const recipients = this.collectAccountRecipients(data.accountEmail, data.companyEmails);
-    await this.send(recipients, `[FACTURA] ${period} — ${data.accountName} — $${data.total.toFixed(2)}`, html);
+    await this.send(recipients, `[COBRO] ${period} — ${data.accountName} — ${money(balance)}`, html);
   }
 
   /* ────────── 8. Overdue Payment Reminder ────────── */
@@ -427,6 +454,93 @@ export class NotificationService {
       if (c.notificationEmail) set.add(c.notificationEmail);
     }
     return Array.from(set);
+  }
+
+  /* ────────── Cobro con PagoPlux ────────── */
+
+  private panelUrl(path = ''): string {
+    return `${this.config.get('FRONTEND_URL', 'https://panel.autorizadorec.com')}${path}`;
+  }
+
+  /** Destinatarios internos de cobranza (los mismos del reporte diario). */
+  private cobranzaRecipients(): string[] {
+    return (this.config.get<string>('COLLECTIONS_REPORT_TO') || 'salazarmanuel6@gmail.com')
+      .split(',').map((r) => r.trim()).filter(Boolean);
+  }
+
+  /** Alerta interna de pagos (montos que no cuadran, avisos sin pago, bloqueos automáticos). */
+  async sendPagosAlert(subject: string, lines: string[]): Promise<void> {
+    const html = this.wrap(`
+      <h2 style="color:#b45309;margin-bottom:8px">${subject}</h2>
+      ${lines.map((l) => `<p style="color:#333;font-size:13px">${l}</p>`).join('')}
+    `);
+    await this.send(this.cobranzaRecipients(), `[PAGOS] ${subject}`, html);
+  }
+
+  async sendPaymentReceived(data: {
+    accountName: string;
+    accountEmail: string;
+    companyEmails: { email: string | null; notificationEmail: string | null }[];
+    amount: number;
+    concepto: string;
+    voucher: string | null;
+    tarjeta: string | null;
+    activada: boolean;
+    desbloqueada: boolean;
+  }): Promise<void> {
+    const td = 'padding:8px 12px;border:1px solid #e9ecef';
+    const th = `${td};background:#f8f9fa;font-weight:600;width:45%`;
+    const html = this.wrap(`
+      <h2 style="color:#16a34a;margin-bottom:8px">Pago recibido</h2>
+      <p style="color:#555;font-size:14px">
+        Recibimos el pago de la cuenta <strong>${data.accountName}</strong>. ¡Gracias!
+      </p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
+        <tr><td style="${th}">Concepto</td><td style="${td}">${data.concepto}</td></tr>
+        <tr><td style="${th}">Monto (IVA incluido)</td><td style="${td}">$${data.amount.toFixed(2)}</td></tr>
+        ${data.tarjeta ? `<tr><td style="${th}">Tarjeta</td><td style="${td}">•••• ${data.tarjeta}</td></tr>` : ''}
+        ${data.voucher ? `<tr><td style="${th}">Comprobante PagoPlux</td><td style="${td}">${data.voucher}</td></tr>` : ''}
+      </table>
+      ${data.activada ? '<p style="color:#555;font-size:13px">Su cuenta quedó <strong>activa</strong>. Ya puede emitir en producción.</p>' : ''}
+      ${data.desbloqueada ? '<p style="color:#555;font-size:13px">Su cuenta quedó <strong>desbloqueada</strong>.</p>' : ''}
+    `);
+    await this.send(
+      this.collectAccountRecipients(data.accountEmail, data.companyEmails),
+      `[PAGO RECIBIDO] ${data.accountName} — $${data.amount.toFixed(2)}`,
+      html,
+    );
+  }
+
+  /** El día del vencimiento (cierre + 5): último correo de cobro antes del bloqueo del panel. */
+  async sendCobroVencido(data: {
+    accountName: string;
+    accountEmail: string;
+    companyEmails: { email: string | null; notificationEmail: string | null }[];
+    balance: number;
+    bloqueoPanel: string;
+    corteApi: string;
+  }): Promise<void> {
+    const fecha = (s: string) => s.split('-').reverse().join('/');
+    const html = this.wrap(`
+      <h2 style="color:#dc2626;margin-bottom:8px">Su pago venció hoy</h2>
+      <p style="color:#555;font-size:14px">
+        La cuenta <strong>${data.accountName}</strong> tiene un saldo pendiente de
+        <strong>$${data.balance.toFixed(2)}</strong> (IVA incluido).
+      </p>
+      <p style="color:#555;font-size:13px">
+        Si no se registra el pago, el <strong>${fecha(data.bloqueoPanel)}</strong> el panel se bloqueará y solo
+        permitirá pagar, y el <strong>${fecha(data.corteApi)}</strong> se suspenderá la emisión de comprobantes.
+      </p>
+      <div style="text-align:center;margin:24px 0">
+        <a href="${this.panelUrl('/client/billing?pagar=1')}" style="display:inline-block;padding:12px 32px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px">Pagar ahora</a>
+      </div>
+      <p style="color:#888;font-size:12px">Si ya realizó el pago, ignore este mensaje.</p>
+    `);
+    await this.send(
+      this.collectAccountRecipients(data.accountEmail, data.companyEmails),
+      `[VENCIDO] ${data.accountName} — $${data.balance.toFixed(2)}`,
+      html,
+    );
   }
 
   /* ────────── System Error Alert (superadmin) ────────── */

@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -6,7 +7,10 @@ import { AppModule } from './app.module';
 import { RedisIoAdapter } from './events/redis-io.adapter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: el aviso de pagos se verifica con una firma HMAC sobre el cuerpo tal cual llegó
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  // Detrás de nginx en la misma máquina: la IP real del cliente viene en X-Forwarded-For
+  app.set('trust proxy', 'loopback');
 
   // WebSocket adapter with Redis pub/sub for multi-instance support
   const configService = app.get(ConfigService);

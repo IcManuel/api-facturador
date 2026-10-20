@@ -12,7 +12,10 @@ import { Payment } from '../../entities/payment.entity';
 import { Company } from '../../entities/company.entity';
 import { Document } from '../../entities/document.entity';
 import { Account } from '../../entities/account.entity';
-import { DocStatus, AccountType } from '../../entities/enums';
+import { DocStatus, AccountType, CompanyEnv } from '../../entities/enums';
+import { CobroUsoService } from '../../cobro/cobro-uso.service';
+import { Cobro } from '../../cobro/cobro.calculator';
+import { currentCycle, ymd } from '../../cobro/cobro.calendar';
 
 @Injectable()
 export class ClientBillingService {
@@ -29,7 +32,40 @@ export class ClientBillingService {
     private readonly documentRepo: Repository<Document>,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
+    private readonly cobroUso: CobroUsoService,
   ) {}
+
+  /** Ciclo vigente de la cuenta y lo que se le cobraría si cerrara hoy (mismo motor del cierre). */
+  private async estimacion(account: Account) {
+    const { start, end } = currentCycle(new Date(), account.billingCycleDay);
+    const desde = ymd(start);
+    const hasta = ymd(end);
+    // Hasta mañana: incluye lo emitido hoy
+    const hoy = new Date();
+    const manana = ymd(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1));
+    const cobro = await this.cobroUso.cobro(account, desde, manana < hasta ? manana : hasta);
+    // Primer mes ya pagado al activar la cuenta
+    const prepaid = await this.billingRepo.findOne({ where: { accountId: account.id, periodStartDate: desde } });
+    const yaPagado = prepaid && !prepaid.closedAt ? Number(prepaid.paidAmount) : 0;
+    return { cycle: { start: desde, end: hasta, closesOn: hasta }, cobro, yaPagado };
+  }
+
+  private resumenCobro(cobro: Cobro, yaPagado: number) {
+    return {
+      total: cobro.total,
+      subtotal: cobro.subtotal,
+      iva: cobro.iva,
+      ivaRate: cobro.ivaRate,
+      ivaIncluido: true,
+      yaPagado,
+      aPagarAlCierre: Math.max(0, Math.round((cobro.total - yaPagado) * 100) / 100),
+      tarifa: cobro.tarifa,
+      precioPorEmpresa: cobro.precioPorEmpresa,
+      baseTotal: cobro.baseTotal,
+      overageDocs: cobro.overageDocs,
+      overageTotal: cobro.overageTotal,
+    };
+  }
 
   async getBillingSummary(accountId: number, companyId: number) {
     // Verify company belongs to account
@@ -43,29 +79,23 @@ export class ClientBillingService {
 
     const account = await this.accountRepo.findOne({ where: { id: accountId } });
 
-    // Current month usage
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
-    const monthStart = new Date(year, month - 1, 1);
-    const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
+    // Uso del ciclo vigente (del día de corte al siguiente), solo producción
+    const { cycle, cobro, yaPagado } = await this.estimacion(account!);
+    const linea = cobro.lineas.find((l) => l.companyId === companyId);
+    const docsThisMonth = linea?.docsTotal ?? 0;
+    const docsAuthorized = linea?.docsAuthorized ?? 0;
+    const docsRejected = await this.documentRepo.createQueryBuilder('d')
+      .where('d.companyId = :companyId', { companyId })
+      .andWhere('d.env = :env', { env: CompanyEnv.PRODUCTION })
+      .andWhere('d.status = :status', { status: DocStatus.REJECTED })
+      .andWhere(`d.createdAt >= (:desde::date)::timestamp AT TIME ZONE 'America/Guayaquil'`, { desde: cycle.start })
+      .getCount();
 
-    const [docsThisMonth, docsAuthorized, docsRejected] = await Promise.all([
-      this.documentRepo.count({
-        where: { companyId, createdAt: Between(monthStart, monthEnd) },
-      }),
-      this.documentRepo.count({
-        where: { companyId, status: DocStatus.AUTHORIZED, createdAt: Between(monthStart, monthEnd) },
-      }),
-      this.documentRepo.count({
-        where: { companyId, status: DocStatus.REJECTED, createdAt: Between(monthStart, monthEnd) },
-      }),
-    ]);
-
-    // Current billing period
+    // Último período cerrado
     const currentPeriod = await this.billingRepo.findOne({
-      where: { accountId, year, month },
+      where: { accountId },
       relations: ['plan'],
+      order: { id: 'DESC' },
     });
 
     // All billing periods for history (last 12 months)
@@ -83,8 +113,9 @@ export class ClientBillingService {
     // Plan info
     const plan = company.plan;
     const docLimit = plan?.docLimit ?? null;
-    const usagePercent = docLimit ? Math.min((docsThisMonth / docLimit) * 100, 100) : null;
-    const overageDocs = docLimit && docsThisMonth > docLimit ? docsThisMonth - docLimit : 0;
+    // El límite del plan se mide con documentos AUTORIZADOS (los rechazados no cuentan)
+    const usagePercent = docLimit ? Math.min((docsAuthorized / docLimit) * 100, 100) : null;
+    const overageDocs = linea?.overageDocs ?? 0;
 
     return {
       // Plan
@@ -121,6 +152,11 @@ export class ClientBillingService {
         unpaidPeriods: unpaidPeriods.length,
       },
 
+      // Ciclo vigente y lo que se cobraría al cerrarlo (toda la cuenta, IVA incluido)
+      cycle,
+      estimate: this.resumenCobro(cobro, yaPagado),
+      company: linea ? { base: linea.base, overageTotal: linea.overageTotal, total: linea.total } : null,
+
       // Account info
       warningMessage: account?.warningMessage || null,
     };
@@ -137,82 +173,36 @@ export class ClientBillingService {
       );
     }
 
-    const companies = await this.companyRepo.find({
-      where: { accountId, isActive: true },
-      relations: ['plan'],
-    });
+    const { cycle, cobro, yaPagado } = await this.estimacion(account);
 
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
-    const monthStart = new Date(year, month - 1, 1);
-    const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
-
-    // Current billing period (per-account)
+    // Último período cerrado e historial
     const currentPeriod = await this.billingRepo.findOne({
-      where: { accountId, year, month },
+      where: { accountId },
       relations: ['plan', 'payments'],
+      order: { id: 'DESC' },
     });
-
-    // Billing history (last 12 months)
     const periods = await this.billingRepo.find({
       where: { accountId },
       relations: ['plan', 'payments'],
-      order: { year: 'DESC', month: 'DESC' },
+      order: { id: 'DESC' },
       take: 12,
     });
-
-    // Debt
     const unpaidPeriods = periods.filter((p) => p.status !== 'paid');
-    const totalDebt = unpaidPeriods.reduce(
-      (sum, p) => sum + Number(p.total) - Number(p.paidAmount),
-      0,
-    );
+    const totalDebt = unpaidPeriods.reduce((sum, p) => sum + Number(p.total) - Number(p.paidAmount), 0);
 
-    // Per-company breakdown for current month
-    const companyBreakdown = await Promise.all(
-      companies.map(async (company) => {
-        const [docsThisMonth, docsAuthorized] = await Promise.all([
-          this.documentRepo.count({
-            where: { companyId: company.id, createdAt: Between(monthStart, monthEnd) },
-          }),
-          this.documentRepo.count({
-            where: {
-              companyId: company.id,
-              status: DocStatus.AUTHORIZED,
-              createdAt: Between(monthStart, monthEnd),
-            },
-          }),
-        ]);
-
-        const plan = company.plan;
-        const docLimit = plan?.docLimit ?? null;
-        const basePrice = Number(plan?.monthlyPrice ?? 0);
-        const overageDocs = docLimit && docsThisMonth > docLimit ? docsThisMonth - docLimit : 0;
-        const overageUnitPrice = Number(plan?.overagePrice ?? 0);
-        const overageTotal = overageDocs * overageUnitPrice;
-        const subtotal = basePrice + overageTotal;
-
-        return {
-          companyId: company.id,
-          name: company.tradeName || company.name,
-          ruc: company.ruc,
-          planName: plan?.name ?? null,
-          docsThisMonth,
-          docsAuthorized,
-          docLimit,
-          basePrice,
-          overageDocs,
-          overageTotal,
-          subtotal,
-        };
-      }),
-    );
-
-    // Persist company breakdown detail if a billing period exists
-    if (currentPeriod) {
-      this.persistCompanyBreakdown(currentPeriod.id, companyBreakdown).catch(() => {});
-    }
+    const companyBreakdown = cobro.lineas.map((l) => ({
+      companyId: l.companyId,
+      name: l.name,
+      ruc: l.ruc,
+      planName: l.planName,
+      docsThisMonth: l.docsTotal,
+      docsAuthorized: l.docsAuthorized,
+      docLimit: l.docLimit,
+      basePrice: l.base,
+      overageDocs: l.overageDocs,
+      overageTotal: l.overageTotal,
+      subtotal: l.total,
+    }));
 
     return {
       accountBilling: {
@@ -226,40 +216,17 @@ export class ClientBillingService {
       companyBreakdown,
       totals: {
         companies: companyBreakdown.length,
-        docs: companyBreakdown.reduce((s, c) => s + c.docsThisMonth, 0),
-        baseTotal: companyBreakdown.reduce((s, c) => s + c.basePrice, 0),
-        overageTotal: companyBreakdown.reduce((s, c) => s + c.overageTotal, 0),
-        grandTotal: companyBreakdown.reduce((s, c) => s + c.subtotal, 0),
+        docs: cobro.docsTotal,
+        baseTotal: cobro.baseTotal,
+        overageTotal: cobro.overageTotal,
+        grandTotal: cobro.total,
+        subtotal: cobro.subtotal,
+        iva: cobro.iva,
       },
+      cycle,
+      estimate: this.resumenCobro(cobro, yaPagado),
       warningMessage: account.warningMessage || null,
     };
-  }
-
-  private async persistCompanyBreakdown(
-    billingPeriodId: number,
-    breakdown: { companyId: number; docsThisMonth: number; docsAuthorized: number; basePrice: number; overageDocs: number; overageTotal: number; subtotal: number }[],
-  ) {
-    for (const row of breakdown) {
-      await this.billingDetailRepo.query(
-        `INSERT INTO app.billing_company_detail
-           (bpe_id, com_id, bcd_docs_total, bcd_docs_authorized, bcd_base_price, bcd_overage_docs, bcd_overage_total, bcd_subtotal)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (bpe_id, com_id)
-         DO UPDATE SET
-           bcd_docs_total = $3,
-           bcd_docs_authorized = $4,
-           bcd_base_price = $5,
-           bcd_overage_docs = $6,
-           bcd_overage_total = $7,
-           bcd_subtotal = $8,
-           bcd_updated_at = NOW()`,
-        [
-          billingPeriodId, row.companyId,
-          row.docsThisMonth, row.docsAuthorized, row.basePrice,
-          row.overageDocs, row.overageTotal, row.subtotal,
-        ],
-      );
-    }
   }
 
   private formatPeriod(p: BillingPeriod) {
@@ -267,7 +234,15 @@ export class ClientBillingService {
       id: p.id,
       year: p.year,
       month: p.month,
-      label: `${String(p.month).padStart(2, '0')}/${p.year}`,
+      label: p.periodStartDate && p.periodEndDate
+        ? `${p.periodStartDate.split('-').reverse().join('/')} – ${p.periodEndDate.split('-').reverse().join('/')}`
+        : `${String(p.month).padStart(2, '0')}/${p.year}`,
+      periodStart: p.periodStartDate,
+      periodEnd: p.periodEndDate,
+      dueDate: p.dueDate,
+      subtotal: Number(p.subtotal),
+      iva: Number(p.iva),
+      ivaRate: Number(p.ivaRate),
       docsTotal: p.docsTotal,
       docsAuthorized: p.docsAuthorized,
       docLimit: p.docLimit,

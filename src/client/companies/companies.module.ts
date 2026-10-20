@@ -10,6 +10,7 @@ import { Document } from '../../entities/document.entity';
 import { EngineModule } from '../../engine/engine.module';
 import { CertificatesModule } from '../../admin/certificates/certificates.module';
 import { AccountApiKeyGuard } from '../../common/guards/account-api-key.guard';
+import { AccountStatusGuard } from '../../common/guards/account-status.guard';
 import { JwtOrAccountKeyGuard } from '../../common/guards/jwt-or-account-key.guard';
 import { ClientCompaniesController } from './companies.controller';
 import { ClientCompaniesService } from './companies.service';
@@ -23,6 +24,6 @@ import { EstablishmentsModule } from '../../establishments/establishments.module
     CertificatesModule,
   ],
   controllers: [ClientCompaniesController],
-  providers: [ClientCompaniesService, AccountApiKeyGuard, JwtOrAccountKeyGuard],
+  providers: [ClientCompaniesService, AccountApiKeyGuard, JwtOrAccountKeyGuard, AccountStatusGuard],
 })
 export class ClientCompaniesModule {}

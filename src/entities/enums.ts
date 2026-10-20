@@ -90,6 +90,7 @@ export enum PaymentMethod {
   CASH = 'cash',
   CARD = 'card',
   OTHER = 'other',
+  PAGOPLUX = 'pagoplux',
 }
 
 export enum LogType {

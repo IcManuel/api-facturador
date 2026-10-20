@@ -36,6 +36,10 @@ export class Payment {
   @Column({ name: 'pay_date', type: 'date' })
   date: string;
 
+  /** Intento de PagoPlux que originó el pago (null en pagos registrados a mano). */
+  @Column({ name: 'pin_id', type: 'int', nullable: true })
+  intentId: number | null;
+
   @Column({ name: 'pay_recorded_by', length: 150 })
   recordedBy: string;
 

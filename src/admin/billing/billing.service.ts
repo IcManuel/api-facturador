@@ -8,6 +8,11 @@ import { AccountStatus, BillingStatus, PlanTier } from '../../entities/enums';
 import { PaginatedResult } from '../../common/dto/pagination.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { NotificationService } from '../../notifications/notification.service';
+import { CobroUsoService } from '../../cobro/cobro-uso.service';
+import { recalcularBloqueo } from '../../cobro/cobro-bloqueo';
+import { Cobro } from '../../cobro/cobro.calculator';
+import { addDays, DIAS_VENCIMIENTO, fromYmd, previousCycleStart, ymd } from '../../cobro/cobro.calendar';
+import { PaymentMethod } from '../../entities/enums';
 
 @Injectable()
 export class BillingService {
@@ -22,6 +27,7 @@ export class BillingService {
     private readonly accountRepo: Repository<Account>,
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
+    private readonly cobroUso: CobroUsoService,
   ) {}
 
   async findAll(
@@ -65,79 +71,28 @@ export class BillingService {
     });
     if (!bp) throw new NotFoundException('Periodo de facturación no encontrado');
 
-    const startDate = new Date(bp.year, bp.month - 1, 1);
-    const endDate = new Date(bp.year, bp.month, 1);
-
-    const companyBreakdown: any[] = await this.dataSource.query(
-      `SELECT
-        c.com_id AS "companyId",
-        c.com_name AS "companyName",
-        c.com_ruc AS "companyRuc",
-        p.spl_tier AS "planTier",
-        p.spl_name AS "planName",
-        p.spl_monthly_price AS "planPrice",
-        p.spl_doc_limit AS "planDocLimit",
-        p.spl_overage_price AS "overageUnitPrice",
-        c.com_overage_enabled AS "overageEnabled",
-        COUNT(d.doc_id)::int AS "docsTotal",
-        COUNT(d.doc_id) FILTER (WHERE d.doc_status = 'AUTHORIZED')::int AS "docsAuthorized",
-        GREATEST(0, COUNT(d.doc_id)::int - COALESCE(p.spl_doc_limit, 999999999)) AS "overageDocs"
-      FROM app.company c
-      JOIN app.subscription_plan p ON p.spl_id = c.spl_id
-      LEFT JOIN app.document d ON d.com_id = c.com_id
-        AND d.doc_env = 'production'
-        AND d.doc_created_at >= $1
-        AND d.doc_created_at < $2
-      WHERE c.acc_id = $3
-      GROUP BY c.com_id, c.com_name, c.com_ruc, p.spl_tier, p.spl_name, p.spl_monthly_price,
-               p.spl_doc_limit, p.spl_overage_price, c.com_overage_enabled
-      ORDER BY c.com_name`,
-      [startDate.toISOString(), endDate.toISOString(), bp.accountId],
-    );
-
-    const companies = companyBreakdown.map((row) => {
-      const planTier = row.planTier as PlanTier;
-      const planPrice = Number(row.planPrice);
-      const overageUnitPrice = Number(row.overageUnitPrice ?? 0);
-      const docsTotal = Number(row.docsTotal);
-
-      let companyTotal: number;
-      let overageDocs: number;
-      let overageTotal: number;
-
-      if (planTier === PlanTier.UNLIMITED) {
-        // Free/unlimited — no charge
-        companyTotal = 0;
-        overageDocs = 0;
-        overageTotal = 0;
-      } else if (planTier === PlanTier.PAYPERUSE) {
-        // Pago por uso: cuota base del plan (puede ser 0 en los planes
-        // antiguos) más cada comprobante autorizado.
-        overageDocs = Number(row.docsAuthorized ?? 0);
-        overageTotal = overageDocs * overageUnitPrice;
-        companyTotal = planPrice + overageTotal;
-      } else {
-        // Fixed plans (basic, professional, enterprise, custom)
-        overageDocs = row.overageEnabled ? Number(row.overageDocs) : 0;
-        overageTotal = overageDocs * overageUnitPrice;
-        companyTotal = planPrice + overageTotal;
-      }
-
+    // Mismo motor que cobró el período: rango del ciclo (o el mes calendario en los antiguos)
+    const desde = bp.periodStartDate ?? ymd(new Date(bp.year, bp.month - 1, 1));
+    const hasta = bp.periodEndDate ? ymd(addDays(fromYmd(bp.periodEndDate), 1)) : ymd(new Date(bp.year, bp.month, 1));
+    const cobro = await this.cobroUso.cobro(bp.account, desde, hasta);
+    const usage = new Map((await this.cobroUso.usage(bp.accountId, desde, hasta)).map((u) => [u.companyId, u]));
+    const companies = cobro.lineas.map((l) => {
+      const u = usage.get(l.companyId);
       return {
-        companyId: row.companyId,
-        companyName: row.companyName,
-        companyRuc: row.companyRuc,
-        planTier,
-        planName: row.planName,
-        planPrice,
-        planDocLimit: row.planDocLimit,
-        overageEnabled: row.overageEnabled,
-        overageUnitPrice,
-        docsTotal,
-        docsAuthorized: Number(row.docsAuthorized),
-        overageDocs,
-        overageTotal,
-        total: companyTotal,
+        companyId: l.companyId,
+        companyName: l.name,
+        companyRuc: l.ruc,
+        planTier: u?.planTier,
+        planName: l.planName,
+        planPrice: l.base,
+        planDocLimit: l.docLimit,
+        overageEnabled: u?.overageEnabled ?? false,
+        overageUnitPrice: l.overageUnitPrice,
+        docsTotal: l.docsTotal,
+        docsAuthorized: l.docsAuthorized,
+        overageDocs: l.overageDocs,
+        overageTotal: l.overageTotal,
+        total: l.total,
       };
     });
 
@@ -155,10 +110,10 @@ export class BillingService {
   // --- Billing period generation ---
 
   async generateBillingPeriods(year: number, month: number): Promise<{ created: number; skipped: number }> {
-    // Get all distinct accounts that have active companies with a billing_start_date <= end of target month
-    const targetEnd = new Date(year, month, 0); // last day of month
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 1);
+    // Generación manual por mes calendario (botón del administrador). Usa el mismo motor.
+    const targetEnd = new Date(year, month, 0);
+    const desde = ymd(new Date(year, month - 1, 1));
+    const hasta = ymd(new Date(year, month, 1));
 
     const accounts: { accId: number }[] = await this.dataSource.query(
       `SELECT DISTINCT c.acc_id AS "accId"
@@ -168,130 +123,89 @@ export class BillingService {
          AND c.com_billing_start_date IS NOT NULL
          AND c.com_billing_start_date <= $1
          AND a.acc_is_internal = false`,
-      [targetEnd.toISOString().slice(0, 10)],
+      [ymd(targetEnd)],
     );
 
     let created = 0;
     let skipped = 0;
-
     for (const { accId } of accounts) {
-      // Check if billing period already exists
-      const existing = await this.repo.findOne({
-        where: { accountId: accId, year, month },
-      });
-
-      if (existing) {
-        skipped++;
-        continue;
-      }
-
-      // Get all active companies for this account
-      const companies: any[] = await this.dataSource.query(
-        `SELECT
-          c.com_id,
-          p.spl_id,
-          p.spl_tier AS "planTier",
-          p.spl_monthly_price AS "planPrice",
-          p.spl_doc_limit AS "docLimit",
-          p.spl_overage_price AS "overagePrice",
-          c.com_overage_enabled AS "overageEnabled",
-          COUNT(d.doc_id)::int AS "docsTotal",
-          COUNT(d.doc_id) FILTER (WHERE d.doc_status = 'AUTHORIZED')::int AS "docsAuthorized"
-        FROM app.company c
-        JOIN app.subscription_plan p ON p.spl_id = c.spl_id
-        LEFT JOIN app.document d ON d.com_id = c.com_id
-          AND d.doc_env = 'production'
-          AND d.doc_created_at >= $1
-          AND d.doc_created_at < $2
-        WHERE c.acc_id = $3 AND c.com_is_active = true
-          AND c.com_billing_start_date <= $4
-        GROUP BY c.com_id, p.spl_id, p.spl_tier, p.spl_monthly_price, p.spl_doc_limit,
-                 p.spl_overage_price, c.com_overage_enabled`,
-        [startDate.toISOString(), endDate.toISOString(), accId, targetEnd.toISOString().slice(0, 10)],
-      );
-
-      if (companies.length === 0) {
-        skipped++;
-        continue;
-      }
-
-      // Calculate totals across all companies for this account
-      let totalBase = 0;
-      let totalOverageDocs = 0;
-      let totalOverageAmount = 0;
-      let totalDocs = 0;
-      let totalDocsAuthorized = 0;
-      let representativePlanId = companies[0].spl_id;
-      let representativeDocLimit: number | null = null;
-      let representativeOveragePrice = 0;
-
-      for (const c of companies) {
-        const tier = c.planTier as PlanTier;
-        const planPrice = Number(c.planPrice);
-        const overagePrice = Number(c.overagePrice ?? 0);
-        const docLimit = c.docLimit ? Number(c.docLimit) : null;
-        const docsTotal = Number(c.docsTotal);
-
-        totalDocs += docsTotal;
-        totalDocsAuthorized += Number(c.docsAuthorized);
-
-        if (tier === PlanTier.UNLIMITED) {
-          // No charge
-        } else if (tier === PlanTier.PAYPERUSE) {
-          const authorized = Number(c.docsAuthorized);
-          totalBase += planPrice;
-          totalOverageDocs += authorized;
-          totalOverageAmount += authorized * overagePrice;
-          representativeOveragePrice = overagePrice;
-        } else {
-          totalBase += planPrice;
-          if (docLimit !== null) {
-            const overage = c.overageEnabled ? Math.max(0, docsTotal - docLimit) : 0;
-            totalOverageDocs += overage;
-            totalOverageAmount += overage * overagePrice;
-          }
-          representativeDocLimit = docLimit;
-          representativeOveragePrice = overagePrice;
-        }
-
-        representativePlanId = c.spl_id;
-      }
-
-      const total = totalBase + totalOverageAmount;
-
-      // For unlimited plans with $0 total, mark as paid immediately
-      const status = total <= 0 ? BillingStatus.PAID : BillingStatus.PENDING;
-
-      const bp = this.repo.create({
-        accountId: accId,
-        planId: representativePlanId,
-        year,
-        month,
-        docsTotal: totalDocs,
-        docsAuthorized: totalDocsAuthorized,
-        docLimit: representativeDocLimit,
-        basePrice: totalBase,
-        overageDocs: totalOverageDocs,
-        overagePrice: representativeOveragePrice,
-        overageTotal: totalOverageAmount,
-        total,
-        paidAmount: total <= 0 ? total : 0,
-        status,
-        paidAt: total <= 0 ? new Date() : null,
-      });
-
-      await this.repo.save(bp);
+      const existing = await this.repo.findOne({ where: { accountId: accId, year, month } });
+      if (existing) { skipped++; continue; }
+      const account = await this.accountRepo.findOne({ where: { id: accId } });
+      if (!account) { skipped++; continue; }
+      const cobro = await this.cobroUso.cobro(account, desde, hasta);
+      if (!cobro.lineas.length) { skipped++; continue; }
+      await this.guardarPeriodo(account, cobro, { year, month, start: null, end: null, closing: new Date() });
       created++;
-
-      // Notification 7: billing invoice generated (only for non-zero totals)
-      if (total > 0) {
-        this.sendBillingNotification(accId, year, month, totalDocs, totalBase, totalOverageDocs, totalOverageAmount, total)
-          .catch(() => {});
-      }
     }
 
     this.logger.log(`Billing periods generated for ${year}-${String(month).padStart(2, '0')}: ${created} created, ${skipped} skipped`);
     return { created, skipped };
+  }
+
+  /**
+   * Guarda un período cerrado con el cobro del motor único: totales con IVA incluido y su
+   * desglose, vencimiento (cierre + 5), detalle por empresa y correo con «Pagar ahora».
+   * Si ya existía el primer mes prepagado (activación de la cuenta), lo completa.
+   */
+  private async guardarPeriodo(
+    account: Account,
+    cobro: Cobro,
+    p: { year: number; month: number; start: string | null; end: string | null; closing: Date },
+    prepaid?: BillingPeriod,
+  ): Promise<BillingPeriod> {
+    const dueDate = ymd(addDays(p.closing, DIAS_VENCIMIENTO));
+    const total = cobro.total;
+    const representative = cobro.lineas[cobro.lineas.length - 1];
+    const representativeLimit = [...cobro.lineas].reverse().find((l) => l.docLimit !== null)?.docLimit ?? null;
+
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const bp = prepaid ?? manager.create(BillingPeriod, { accountId: account.id, paidAmount: 0 });
+      Object.assign(bp, {
+        planId: representative?.planId ?? bp.planId,
+        year: p.year,
+        month: p.month,
+        periodStartDate: p.start,
+        periodEndDate: p.end,
+        docsTotal: cobro.docsTotal,
+        docsAuthorized: cobro.docsAuthorized,
+        docLimit: representativeLimit,
+        basePrice: cobro.baseTotal,
+        overageDocs: cobro.overageDocs,
+        overagePrice: representative?.overageUnitPrice ?? 0,
+        overageTotal: cobro.overageTotal,
+        total,
+        subtotal: cobro.subtotal,
+        iva: cobro.iva,
+        ivaRate: cobro.ivaRate,
+        dueDate: prepaid ? prepaid.dueDate ?? dueDate : dueDate,
+        closedAt: new Date(),
+      });
+      bp.status = this.computeStatus(total, Number(bp.paidAmount));
+      if (bp.status === BillingStatus.PAID && !bp.paidAt) bp.paidAt = new Date();
+      if (bp.status !== BillingStatus.PAID) bp.paidAt = null;
+      const row = await manager.save(BillingPeriod, bp);
+
+      for (const l of cobro.lineas) {
+        await manager.query(
+          `INSERT INTO app.billing_company_detail
+             (bpe_id, com_id, bcd_docs_total, bcd_docs_authorized, bcd_base_price, bcd_overage_docs, bcd_overage_total, bcd_subtotal)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (bpe_id, com_id) DO UPDATE SET
+             bcd_docs_total = $3, bcd_docs_authorized = $4, bcd_base_price = $5, bcd_overage_docs = $6,
+             bcd_overage_total = $7, bcd_subtotal = $8, bcd_updated_at = NOW()`,
+          [row.id, l.companyId, l.docsTotal, l.docsAuthorized, l.base, l.overageDocs, l.overageTotal, l.total],
+        );
+      }
+      return row;
+    });
+
+    const balance = Math.round((total - Number(saved.paidAmount)) * 100) / 100;
+    // Con el panel bloqueado por mora no se envían más correos de cobro
+    if (balance > 0 && !account.paymentLock && account.status === AccountStatus.ACTIVE) {
+      this.sendBillingNotification(account.id, saved, cobro, balance).catch(() => {});
+    }
+    return saved;
   }
 
   // --- Payment management ---
@@ -301,42 +215,58 @@ export class BillingService {
     dto: CreatePaymentDto,
     recordedBy: string,
   ): Promise<Payment> {
-    const bp = await this.repo.findOne({ where: { id: billingPeriodId } });
+    return this.dataSource.transaction(async (manager) => {
+      const payment = await BillingService.registrarPago(manager, billingPeriodId, {
+        amount: dto.amount, method: dto.method, reference: dto.reference ?? null,
+        notes: dto.notes ?? null, date: dto.date, recordedBy,
+      });
+      // Igual que un pago con PagoPlux: si ya no debe lo vencido, se levanta el bloqueo por mora
+      await recalcularBloqueo(manager, payment.accountId);
+      return payment;
+    });
+  }
+
+  /**
+   * Registra un pago en un período dentro de una transacción (lo usan el administrador y el
+   * cobro con PagoPlux). Bloquea la fila del período para que dos pagos simultáneos no se pisen.
+   */
+  static async registrarPago(
+    manager: import('typeorm').EntityManager,
+    billingPeriodId: number,
+    pago: { amount: number; method: PaymentMethod; reference: string | null; notes: string | null; date: string; recordedBy: string; intentId?: number | null },
+  ): Promise<Payment> {
+    const bp = await manager.getRepository(BillingPeriod).createQueryBuilder('bp')
+      .setLock('pessimistic_write')
+      .where('bp.id = :id', { id: billingPeriodId })
+      .getOne();
     if (!bp) throw new NotFoundException('Periodo de facturación no encontrado');
 
     const total = Number(bp.total);
     const currentPaid = Number(bp.paidAmount);
-    const newPaid = currentPaid + dto.amount;
-
+    const newPaid = Math.round((currentPaid + pago.amount) * 100) / 100;
     if (newPaid > total * 1.001) {
       throw new BadRequestException(
         `El pago excede el saldo. Total: $${total.toFixed(2)}, Pagado: $${currentPaid.toFixed(2)}, Saldo: $${(total - currentPaid).toFixed(2)}`,
       );
     }
 
-    return this.dataSource.transaction(async (manager) => {
-      const payment = manager.create(Payment, {
-        billingPeriodId,
-        accountId: bp.accountId,
-        amount: dto.amount,
-        method: dto.method,
-        reference: dto.reference ?? null,
-        notes: dto.notes ?? null,
-        date: dto.date,
-        recordedBy,
-      });
+    const saved = await manager.save(Payment, manager.create(Payment, {
+      billingPeriodId,
+      accountId: bp.accountId,
+      amount: pago.amount,
+      method: pago.method,
+      reference: pago.reference,
+      notes: pago.notes,
+      date: pago.date,
+      recordedBy: pago.recordedBy,
+      intentId: pago.intentId ?? null,
+    }));
 
-      const saved = await manager.save(Payment, payment);
-
-      bp.paidAmount = newPaid;
-      bp.status = this.computeStatus(total, newPaid);
-      if (bp.status === BillingStatus.PAID) {
-        bp.paidAt = new Date();
-      }
-      await manager.save(BillingPeriod, bp);
-
-      return saved;
-    });
+    bp.paidAmount = newPaid;
+    bp.status = BillingService.statusFor(total, newPaid);
+    bp.paidAt = bp.status === BillingStatus.PAID ? new Date() : null;
+    await manager.save(BillingPeriod, bp);
+    return saved;
   }
 
   async removePayment(billingPeriodId: number, paymentId: number): Promise<void> {
@@ -389,23 +319,19 @@ export class BillingService {
   }
 
   private computeStatus(total: number, paidAmount: number): BillingStatus {
+    return BillingService.statusFor(total, paidAmount);
+  }
+
+  static statusFor(total: number, paidAmount: number): BillingStatus {
     if (total <= 0) return BillingStatus.PAID;
     if (paidAmount >= total * 0.999) return BillingStatus.PAID;
     if (paidAmount > 0) return BillingStatus.PARTIAL;
     return BillingStatus.PENDING;
   }
 
-  private async sendBillingNotification(
-    accountId: number, year: number, month: number,
-    docsTotal: number, basePrice: number,
-    overageDocs: number, overageTotal: number, total: number,
-  ) {
-    const account = await this.accountRepo.findOne({
-      where: { id: accountId },
-      relations: ['companies'],
-    });
+  private async sendBillingNotification(accountId: number, bp: BillingPeriod, cobro: Cobro, balance: number) {
+    const account = await this.accountRepo.findOne({ where: { id: accountId }, relations: ['companies'] });
     if (!account) return;
-
     const companyEmails = (account.companies ?? [])
       .filter((c) => c.isActive)
       .map((c) => ({ email: c.email, notificationEmail: c.notificationEmail }));
@@ -414,26 +340,26 @@ export class BillingService {
       accountName: account.name,
       accountEmail: account.email,
       companyEmails,
-      year, month, docsTotal, basePrice, overageDocs, overageTotal, total,
+      year: bp.year,
+      month: bp.month,
+      periodStart: bp.periodStartDate,
+      periodEnd: bp.periodEndDate,
+      docsTotal: cobro.docsTotal,
+      docsAuthorized: cobro.docsAuthorized,
+      basePrice: cobro.baseTotal,
+      overageDocs: cobro.overageDocs,
+      overageTotal: cobro.overageTotal,
+      total: cobro.total,
+      subtotal: cobro.subtotal,
+      iva: cobro.iva,
+      ivaRate: cobro.ivaRate,
+      balance,
+      dueDate: bp.dueDate,
+      lineas: cobro.lineas.map((l) => ({ name: l.name, planName: l.planName, docsAuthorized: l.docsAuthorized, base: l.base, overageDocs: l.overageDocs, overageTotal: l.overageTotal, total: l.total })),
     });
   }
 
   /* ────────── Anniversary billing (per-account cycle_day) ────────── */
-
-  /**
-   * Compute the previous cycle date (activation-day of previous month) given a
-   * closing date (today for the cron). Handles months with fewer days.
-   */
-  private prevCycleDate(closing: Date): Date {
-    const prev = new Date(closing);
-    prev.setMonth(prev.getMonth() - 1);
-    // If overflowed into an earlier month (e.g. Mar 31 → Mar 3 because Feb has 28),
-    // clip to the last day of the intended previous month.
-    if (prev.getMonth() !== (closing.getMonth() - 1 + 12) % 12) {
-      prev.setDate(0);
-    }
-    return prev;
-  }
 
   /** Next occurrence of `cycleDay` from `from`, adjusted to month length. */
   static nextBillingDate(from: Date, cycleDay: number): Date {
@@ -454,21 +380,18 @@ export class BillingService {
    * is the last day of the month and the month is shorter than some cycle days,
    * also matches accounts with cycle_day beyond the month length).
    *
-   * For each account, generates the period `[prevCycleDate, today - 1 day]` with
+   * For each account, generates the period `[previousCycleStart, today - 1 day]` with
    * `year+month` set to the closing month. Idempotent: skips if a period with the
    * same accountId+periodStartDate already exists.
    */
   async closeAnniversaryPeriodsForToday(now: Date = new Date()): Promise<{ created: number; skipped: number; matched: number }> {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const y = today.getFullYear();
-    const m = today.getMonth();
     const todayDay = today.getDate();
-    const daysInMonth = new Date(y, m + 1, 0).getDate();
-    const isLastDay = todayDay === daysInMonth;
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
 
-    // Which cycle_day values are considered "ending today"?
+    // Cuentas cuyo ciclo cierra hoy (el último día del mes también cierra las de corte 29-31)
     const cycleDayCandidates: number[] = [todayDay];
-    if (isLastDay) {
+    if (todayDay === daysInMonth) {
       for (let d = todayDay + 1; d <= 31; d++) cycleDayCandidates.push(d);
     }
 
@@ -480,120 +403,27 @@ export class BillingService {
       .andWhere('a.billingCycleDay IN (:...days)', { days: cycleDayCandidates })
       .getMany();
 
-    const prev = this.prevCycleDate(today);
-    const periodStartStr = prev.toISOString().slice(0, 10);
-    const periodEnd = new Date(today);
-    periodEnd.setDate(periodEnd.getDate() - 1);
-    const periodEndStr = periodEnd.toISOString().slice(0, 10);
-    const closingYear = today.getFullYear();
-    const closingMonth = today.getMonth() + 1;
-
+    const hasta = ymd(today);
+    const periodEnd = ymd(addDays(today, -1));
     let created = 0;
     let skipped = 0;
 
     for (const account of accounts) {
-      const existing = await this.repo.findOne({
-        where: { accountId: account.id, periodStartDate: periodStartStr },
-      });
-      if (existing) { skipped++; continue; }
+      const desde = ymd(previousCycleStart(today, account.billingCycleDay));
+      const existing = await this.repo.findOne({ where: { accountId: account.id, periodStartDate: desde } });
+      // Ya cerrado: idempotente. El primer mes prepagado (closedAt NULL) se completa con lo usado.
+      if (existing && existing.closedAt) { skipped++; continue; }
 
-      const companies: any[] = await this.dataSource.query(
-        `SELECT
-          c.com_id,
-          p.spl_id,
-          p.spl_tier AS "planTier",
-          p.spl_monthly_price AS "planPrice",
-          p.spl_doc_limit AS "docLimit",
-          p.spl_overage_price AS "overagePrice",
-          c.com_overage_enabled AS "overageEnabled",
-          COUNT(d.doc_id)::int AS "docsTotal",
-          COUNT(d.doc_id) FILTER (WHERE d.doc_status = 'AUTHORIZED')::int AS "docsAuthorized"
-        FROM app.company c
-        JOIN app.subscription_plan p ON p.spl_id = c.spl_id
-        LEFT JOIN app.document d ON d.com_id = c.com_id
-          AND d.doc_env = 'production'
-          AND d.doc_created_at >= $1
-          AND d.doc_created_at < $2
-        WHERE c.acc_id = $3 AND c.com_is_active = true
-        GROUP BY c.com_id, p.spl_id, p.spl_tier, p.spl_monthly_price, p.spl_doc_limit,
-                 p.spl_overage_price, c.com_overage_enabled`,
-        [`${periodStartStr}T00:00:00`, `${today.toISOString().slice(0, 10)}T00:00:00`, account.id],
-      );
+      const cobro = await this.cobroUso.cobro(account, desde, hasta);
+      if (!cobro.lineas.length) { skipped++; continue; }
 
-      if (companies.length === 0) { skipped++; continue; }
-
-      let totalBase = 0;
-      let totalOverageDocs = 0;
-      let totalOverageAmount = 0;
-      let totalDocs = 0;
-      let totalDocsAuthorized = 0;
-      let representativePlanId = companies[0].spl_id;
-      let representativeDocLimit: number | null = null;
-      let representativeOveragePrice = 0;
-
-      for (const c of companies) {
-        const tier = c.planTier as PlanTier;
-        const planPrice = Number(c.planPrice);
-        const overagePrice = Number(c.overagePrice ?? 0);
-        const docLimit = c.docLimit ? Number(c.docLimit) : null;
-        const docsTotal = Number(c.docsTotal);
-
-        totalDocs += docsTotal;
-        totalDocsAuthorized += Number(c.docsAuthorized);
-
-        if (tier === PlanTier.UNLIMITED) {
-          // no charge
-        } else if (tier === PlanTier.PAYPERUSE) {
-          const authorized = Number(c.docsAuthorized);
-          totalBase += planPrice;
-          totalOverageDocs += authorized;
-          totalOverageAmount += authorized * overagePrice;
-          representativeOveragePrice = overagePrice;
-        } else {
-          totalBase += planPrice;
-          if (docLimit !== null) {
-            const overage = c.overageEnabled ? Math.max(0, docsTotal - docLimit) : 0;
-            totalOverageDocs += overage;
-            totalOverageAmount += overage * overagePrice;
-          }
-          representativeDocLimit = docLimit;
-          representativeOveragePrice = overagePrice;
-        }
-
-        representativePlanId = c.spl_id;
-      }
-
-      const total = totalBase + totalOverageAmount;
-      const status = total <= 0 ? BillingStatus.PAID : BillingStatus.PENDING;
-
-      await this.repo.save(this.repo.create({
-        accountId: account.id,
-        planId: representativePlanId,
-        year: closingYear,
-        month: closingMonth,
-        periodStartDate: periodStartStr,
-        periodEndDate: periodEndStr,
-        docsTotal: totalDocs,
-        docsAuthorized: totalDocsAuthorized,
-        docLimit: representativeDocLimit,
-        basePrice: totalBase,
-        overageDocs: totalOverageDocs,
-        overagePrice: representativeOveragePrice,
-        overageTotal: totalOverageAmount,
-        total,
-        paidAmount: total <= 0 ? total : 0,
-        status,
-        paidAt: total <= 0 ? new Date() : null,
-      }));
+      await this.guardarPeriodo(account, cobro, {
+        year: today.getFullYear(), month: today.getMonth() + 1, start: desde, end: periodEnd, closing: today,
+      }, existing ?? undefined);
       created++;
-
-      if (total > 0) {
-        this.sendBillingNotification(account.id, closingYear, closingMonth, totalDocs, totalBase, totalOverageDocs, totalOverageAmount, total)
-          .catch(() => {});
-      }
     }
 
-    this.logger.log(`Anniversary billing for ${today.toISOString().slice(0, 10)}: matched=${accounts.length}, created=${created}, skipped=${skipped}`);
+    this.logger.log(`Anniversary billing for ${hasta}: matched=${accounts.length}, created=${created}, skipped=${skipped}`);
     return { created, skipped, matched: accounts.length };
   }
 
@@ -614,110 +444,53 @@ export class BillingService {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const todayDay = today.getDate();
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-
-    // Si hoy es el último día del mes, también entran las cuentas cuyo día de corte
-    // no existe en este mes (p. ej. corte 31 en un mes de 30 días).
     const cycleDays: number[] = [todayDay];
     if (todayDay === daysInMonth) {
       for (let d = todayDay + 1; d <= 31; d++) cycleDays.push(d);
     }
+    const todayStr = ymd(today);
+    const periodEndStr = ymd(addDays(today, -1));
+    const periodStartStr = ymd(previousCycleStart(today, todayDay));
 
-    const periodStart = this.prevCycleDate(today);
-    const periodStartStr = periodStart.toISOString().slice(0, 10);
-    const periodEnd = new Date(today);
-    periodEnd.setDate(periodEnd.getDate() - 1);
-    const periodEndStr = periodEnd.toISOString().slice(0, 10);
-    const todayStr = today.toISOString().slice(0, 10);
-
-    const rows: any[] = await this.dataSource.query(
-      `SELECT
-         a.acc_id                AS "accountId",
-         a.acc_name              AS "accountName",
-         a.acc_email             AS "accountEmail",
-         a.acc_phone             AS "accountPhone",
-         a.acc_billing_cycle_day AS "cycleDay",
-         c.com_id                AS "companyId",
-         c.com_name              AS "companyName",
-         c.com_ruc               AS "companyRuc",
-         p.spl_name              AS "planName",
-         p.spl_tier              AS "planTier",
-         p.spl_monthly_price     AS "planPrice",
-         p.spl_doc_limit         AS "docLimit",
-         p.spl_overage_price     AS "overagePrice",
-         c.com_overage_enabled   AS "overageEnabled",
-         COUNT(d.doc_id) FILTER (WHERE d.doc_env = 'production')::int AS "docsTotal",
-         COUNT(d.doc_id) FILTER (WHERE d.doc_env = 'production' AND d.doc_status = 'AUTHORIZED')::int AS "docsAuthorized"
-       FROM app.account a
-       JOIN app.company c ON c.acc_id = a.acc_id AND c.com_is_active = true
-       JOIN app.subscription_plan p ON p.spl_id = c.spl_id
-       LEFT JOIN app.document d ON d.com_id = c.com_id
-            AND d.doc_created_at >= $1 AND d.doc_created_at < $2
-       WHERE a.acc_status = $3
-         AND a.acc_is_active = true
-         AND a.acc_is_internal = false
-         AND a.acc_billing_cycle_day = ANY($4)
-       GROUP BY a.acc_id, a.acc_name, a.acc_email, a.acc_phone, a.acc_billing_cycle_day,
-                c.com_id, c.com_name, c.com_ruc, p.spl_name, p.spl_tier, p.spl_monthly_price,
-                p.spl_doc_limit, p.spl_overage_price, c.com_overage_enabled
-       ORDER BY a.acc_name, c.com_name`,
-      [`${periodStartStr}T00:00:00`, `${todayStr}T00:00:00`, AccountStatus.ACTIVE, cycleDays],
-    );
+    const dueAccounts = await this.accountRepo
+      .createQueryBuilder('a')
+      .where('a.status = :status', { status: AccountStatus.ACTIVE })
+      .andWhere('a.isActive = true')
+      .andWhere('a.isInternal = false')
+      .andWhere('a.billingCycleDay IN (:...days)', { days: cycleDays })
+      .getMany();
 
     const byAccount = new Map<number, any>();
-
-    for (const r of rows) {
-      const planPrice = Number(r.planPrice ?? 0);
-      const overagePrice = Number(r.overagePrice ?? 0);
-      const docLimit = r.docLimit ? Number(r.docLimit) : null;
-      const docsTotal = Number(r.docsTotal);
-      const docsAuthorized = Number(r.docsAuthorized);
-
-      let base = 0;
-      let overageDocs = 0;
-
-      if (r.planTier === PlanTier.UNLIMITED) {
-        // sin cargo
-      } else if (r.planTier === PlanTier.PAYPERUSE) {
-        base = planPrice;
-        overageDocs = docsAuthorized;
-      } else {
-        base = planPrice;
-        if (docLimit !== null && r.overageEnabled) {
-          overageDocs = Math.max(0, docsTotal - docLimit);
-        }
-      }
-
-      const overageAmount = Math.round(overageDocs * overagePrice * 100) / 100;
-      const subtotal = Math.round((base + overageAmount) * 100) / 100;
-
-      if (!byAccount.has(r.accountId)) {
-        byAccount.set(r.accountId, {
-          accountId: r.accountId,
-          accountName: r.accountName,
-          accountEmail: r.accountEmail,
-          accountPhone: r.accountPhone,
-          cycleDay: r.cycleDay,
-          companies: [],
-          total: 0,
-        });
-      }
-
-      const acc = byAccount.get(r.accountId);
-      acc.companies.push({
-        companyId: r.companyId,
-        companyName: r.companyName,
-        companyRuc: r.companyRuc,
-        planName: r.planName,
-        planTier: r.planTier,
-        base,
-        docsTotal,
-        docsAuthorized,
-        docLimit,
-        overageDocs,
-        overageAmount,
-        subtotal,
+    for (const account of dueAccounts) {
+      const desde = ymd(previousCycleStart(today, account.billingCycleDay));
+      const cobro = await this.cobroUso.cobro(account, desde, todayStr);
+      // Primer mes ya pagado al activar: solo se debe lo que no estaba pagado
+      const prepaid = await this.repo.findOne({ where: { accountId: account.id, periodStartDate: desde } });
+      const yaPagado = prepaid && !prepaid.closedAt ? Number(prepaid.paidAmount) : 0;
+      byAccount.set(account.id, {
+        accountId: account.id,
+        accountName: account.name,
+        accountEmail: account.email,
+        accountPhone: account.phone,
+        cycleDay: account.billingCycleDay,
+        tarifa: cobro.tarifa,
+        companies: cobro.lineas.map((l) => ({
+          companyId: l.companyId,
+          companyName: l.name,
+          companyRuc: l.ruc,
+          planName: l.planName,
+          base: l.base,
+          docsTotal: l.docsTotal,
+          docsAuthorized: l.docsAuthorized,
+          docLimit: l.docLimit,
+          overageDocs: l.overageDocs,
+          overageAmount: l.overageTotal,
+          subtotal: l.total,
+        })),
+        total: Math.max(0, Math.round((cobro.total - yaPagado) * 100) / 100),
+        subtotal: cobro.subtotal,
+        iva: cobro.iva,
       });
-      acc.total = Math.round((acc.total + subtotal) * 100) / 100;
     }
 
     const accounts = [...byAccount.values()]
@@ -742,6 +515,7 @@ export class BillingService {
        WHERE bp.bpe_status IN ('pending', 'partial', 'overdue')
          AND bp.bpe_total > COALESCE(bp.bpe_paid_amount, 0)
          AND a.acc_is_internal = false
+         AND bp.bpe_closed_at IS NOT NULL
          AND COALESCE(bp.bpe_period_end_date, make_date(bp.bpe_year, bp.bpe_month, 1)) < $1::date
        ORDER BY bp.bpe_year, bp.bpe_month, a.acc_name`,
       [todayStr],

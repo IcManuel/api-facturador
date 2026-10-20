@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from '../../entities/account.entity';
+import { AccountStatus } from '../../entities/enums';
 
 @Injectable()
 export class AccountApiKeyGuard implements CanActivate {
@@ -32,6 +33,15 @@ export class AccountApiKeyGuard implements CanActivate {
 
     if (!account) {
       throw new UnauthorizedException('Account API key inválida o cuenta inactiva');
+    }
+
+    // La Account Key es acceso de integración, como la API de emisión: se corta con la cuenta
+    // bloqueada, suspendida o con la demo vencida (el bloqueo solo del panel no la afecta).
+    if (account.status === AccountStatus.BLOCKED || account.status === AccountStatus.SUSPENDED) {
+      throw new UnauthorizedException('Cuenta bloqueada. Contacte al administrador.');
+    }
+    if (account.status === AccountStatus.TRIAL && account.trialEndsAt && new Date() > account.trialEndsAt) {
+      throw new UnauthorizedException('Su periodo de prueba ha expirado. Contacte al equipo de AutorizadorEC para activar su cuenta.');
     }
 
     // Set request.user with accountId so @CurrentUser('accountId') works

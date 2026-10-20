@@ -1,3 +1,4 @@
+import { CobroModule } from '../../cobro/cobro.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Company } from '../../entities/company.entity';
@@ -11,6 +12,7 @@ import { ClientDashboardService } from './dashboard.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Company, Document, BillingPeriod, Certificate, Account]),
+    CobroModule,
   ],
   controllers: [ClientDashboardController],
   providers: [ClientDashboardService],
