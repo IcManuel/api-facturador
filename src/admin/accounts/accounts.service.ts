@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -12,6 +12,8 @@ import { CreateAccountUserDto } from './dto/create-account-user.dto';
 import { UpdateAccountUserDto } from './dto/update-account-user.dto';
 import { PaginatedResult } from '../../common/dto/pagination.dto';
 import { NotificationService } from '../../notifications/notification.service';
+import { parseIntegratorPricing, precioDelTramo } from '../../cobro/cobro.calculator';
+import { IntegratorPricingDto } from './dto/integrator-pricing.dto';
 
 @Injectable()
 export class AccountsService {
@@ -354,6 +356,54 @@ export class AccountsService {
    * Extend (or start) the trial period by N days. If the current trial is still
    * in the future, the days are added on top of it; otherwise they count from now.
    */
+  /** Tarifa de integrador y cuánto pagaría hoy con sus empresas activas (sin documentos). */
+  async getIntegratorPricing(accountId: number) {
+    const account = await this.repo.findOne({ where: { id: accountId } });
+    if (!account) throw new NotFoundException('Cuenta no encontrada');
+    const pricing = parseIntegratorPricing(account.integratorPricing);
+    const [{ n }] = await this.repo.query(
+      `SELECT count(*)::int AS n FROM app.company WHERE acc_id = $1 AND com_is_active`,
+      [accountId],
+    );
+    const empresasActivas = Number(n);
+    const precioPorEmpresa = pricing ? precioDelTramo(pricing, empresasActivas) : null;
+    return {
+      pricing,
+      empresasActivas,
+      precioPorEmpresa,
+      cuotaMensual: precioPorEmpresa === null ? null : Math.round(precioPorEmpresa * empresasActivas * 100) / 100,
+    };
+  }
+
+  /**
+   * Asigna (o quita, con null) la tarifa de integrador. Los tramos se ordenan; el último
+   * debe quedar abierto («de ahí en adelante») y los límites no pueden repetirse.
+   * Aplica desde el próximo cierre del ciclo.
+   */
+  async setIntegratorPricing(accountId: number, dto: IntegratorPricingDto | null) {
+    const account = await this.repo.findOne({ where: { id: accountId } });
+    if (!account) throw new NotFoundException('Cuenta no encontrada');
+    if (dto) {
+      const tramos = [...dto.tramos].sort((a, b) => (a.hasta ?? Infinity) - (b.hasta ?? Infinity));
+      const abiertos = tramos.filter((t) => t.hasta === null || t.hasta === undefined);
+      if (abiertos.length !== 1) {
+        throw new BadRequestException('Debe haber exactamente un tramo abierto (sin límite) para el resto de empresas.');
+      }
+      const limites = tramos.filter((t) => t.hasta !== null && t.hasta !== undefined).map((t) => t.hasta);
+      if (new Set(limites).size !== limites.length) {
+        throw new BadRequestException('Dos tramos no pueden tener el mismo límite de empresas.');
+      }
+      account.integratorPricing = {
+        tramos: tramos.map((t) => ({ hasta: t.hasta ?? null, precio: Number(t.precio) })),
+        porDocumento: Number(dto.porDocumento),
+      };
+    } else {
+      account.integratorPricing = null;
+    }
+    await this.repo.save(account);
+    return this.getIntegratorPricing(accountId);
+  }
+
   async extendTrial(accountId: number, days: number): Promise<Account> {
     const account = await this.repo.findOne({ where: { id: accountId } });
     if (!account) throw new NotFoundException('Cuenta no encontrada');

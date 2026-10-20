@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -19,6 +20,7 @@ import { UpdateAccountDto } from './dto/update-account.dto';
 import { CreateAccountUserDto } from './dto/create-account-user.dto';
 import { UpdateAccountUserDto } from './dto/update-account-user.dto';
 import { ExtendTrialDto } from './dto/extend-trial.dto';
+import { IntegratorPricingDto } from './dto/integrator-pricing.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
@@ -107,6 +109,24 @@ export class AccountsController {
   }
 
   // ── Account Activation ──
+
+  @Get(':id/integrator-pricing')
+  @ApiOperation({ summary: 'Tarifa de integrador de la cuenta y vista previa con sus empresas activas' })
+  getIntegratorPricing(@Param('id', ParseIntPipe) id: number) {
+    return this.service.getIntegratorPricing(id);
+  }
+
+  @Put(':id/integrator-pricing')
+  @ApiOperation({ summary: 'Asignar tarifa de integrador (precio por empresa activa según tramos + valor por documento)' })
+  setIntegratorPricing(@Param('id', ParseIntPipe) id: number, @Body() dto: IntegratorPricingDto) {
+    return this.service.setIntegratorPricing(id, dto);
+  }
+
+  @Delete(':id/integrator-pricing')
+  @ApiOperation({ summary: 'Quitar la tarifa de integrador (vuelve a cobrarse con el plan de cada empresa)' })
+  removeIntegratorPricing(@Param('id', ParseIntPipe) id: number) {
+    return this.service.setIntegratorPricing(id, null);
+  }
 
   @Post(':id/activate')
   @ApiOperation({ summary: 'Activar cuenta (convertir de trial a activa)' })

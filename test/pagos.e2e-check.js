@@ -225,6 +225,32 @@ const addDays = (d, n) => { const r = new Date(d.getFullYear(), d.getMonth(), d.
     ok((await q(`SELECT count(*)::int n FROM app.billing_company_detail bcd JOIN app.billing_period bp USING (bpe_id) WHERE bp.acc_id = $1`, [I.id]))[0].n === 3, 'Detalle por empresa guardado al cerrar');
     await billing.closeAnniversaryPeriodsForToday(closing);
     ok((await q(`SELECT count(*)::int n FROM app.billing_period WHERE acc_id = $1`, [I.id]))[0].n === 1, 'Cerrar dos veces el mismo día no duplica el período');
+
+    // ── 6. Admin: tarifa de integrador y pagos en línea ──────────────────────
+    console.log('\n── Admin');
+    const ADMIN = jwt.sign({ sub: 1, email: 'admin@facturaec.com', role: 'platform_admin' }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const T = await cuenta('T (tarifa)', { cycleDay: day, empresas: 2 });
+    s = await call('PUT', `/admin/accounts/${T.id}/integrator-pricing`, ADMIN, { tramos: [{ hasta: null, precio: 3 }, { hasta: null, precio: 2 }], porDocumento: 0.05 });
+    ok(s.status === 400 && /tramo abierto/.test(JSON.stringify(s.body)), 'Tarifa con dos tramos abiertos: se rechaza', s.body);
+    s = await call('PUT', `/admin/accounts/${T.id}/integrator-pricing`, ADMIN, { tramos: [{ hasta: 20, precio: 3 }, { hasta: 20, precio: 2 }, { hasta: null, precio: 1 }], porDocumento: 0.05 });
+    ok(s.status === 400, 'Tarifa con límites repetidos: se rechaza');
+    s = await call('PUT', `/admin/accounts/${T.id}/integrator-pricing`, ADMIN, { tramos: [{ hasta: null, precio: 2 }, { hasta: 1, precio: 4 }], porDocumento: 0.1 });
+    ok(s.status === 200 && s.body?.empresasActivas === 2 && s.body?.precioPorEmpresa === 2 && s.body?.cuotaMensual === 4, 'Tarifa guardada (tramos desordenados se ordenan): vista previa 2 × $2 = $4', s.body);
+    ok((await call('PUT', `/admin/accounts/${T.id}/integrator-pricing`, T.jwt, { tramos: [{ hasta: null, precio: 0 }], porDocumento: 0 })).status === 403, 'Un cliente no puede cambiar su tarifa (403)');
+    await billing.closeAnniversaryPeriodsForToday(closing);
+    ok(Number((await q(`SELECT bpe_total FROM app.billing_period WHERE acc_id = $1`, [T.id]))[0]?.bpe_total) === 4, 'El cierre usa la tarifa asignada desde el admin ($4,00)');
+    s = await call('DELETE', `/admin/accounts/${T.id}/integrator-pricing`, ADMIN);
+    ok(s.status === 200 && s.body?.pricing === null, 'Tarifa quitada: vuelve a los planes');
+
+    s = await call('GET', '/admin/pagos/resumen', ADMIN);
+    ok(s.status === 200 && s.body?.errores >= 1 && s.body?.pagadosMes >= 3, 'Resumen de pagos: cuenta el pago con error y los confirmados', s.body);
+    s = await call('GET', '/admin/pagos/intentos?status=ERROR', ADMIN);
+    ok(s.body?.data?.some((i) => i.id === x1.body.pagoId && i.status === 'ERROR'), 'Lista «Por revisar»: aparece el pago con monto distinto');
+    s = await call('GET', `/admin/pagos/intentos/${p1.body.pagoId}`, ADMIN);
+    ok(s.body?.pagos?.length === 1 && s.body?.avisos?.length >= 3 && s.body?.status === 'PAGADO', 'Detalle: el pago registrado y todos sus avisos (rechazo, cobro, repetidos)', { pagos: s.body?.pagos?.length, avisos: s.body?.avisos?.length });
+    s = await call('GET', '/admin/pagos/avisos?result=MONTO', ADMIN);
+    ok(s.body?.data?.some((a) => a.result === 'MONTO'), 'Avisos sin resolver: aparece el de monto distinto');
+    ok((await call('GET', '/admin/pagos/resumen', P.jwt)).status === 403, 'Un cliente no ve los pagos de otros (403)');
   } finally {
     // ── Limpieza: solo lo creado por este script ──
     if (created.acc.length) {
