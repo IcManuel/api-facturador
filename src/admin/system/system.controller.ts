@@ -1,9 +1,12 @@
 import { Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { SriService } from '../../engine/sri/sri.service';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Sistema')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/system')
 export class SystemController {
   constructor(private readonly sri: SriService) {}

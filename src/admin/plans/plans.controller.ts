@@ -12,9 +12,12 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Planes')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/plans')
 export class PlansController {
   constructor(private readonly service: PlansService) {}

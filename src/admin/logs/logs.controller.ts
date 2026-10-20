@@ -8,9 +8,12 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { LogsService } from './logs.service';
 import { LogType, LogLevel } from '../../entities/enums';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Logs')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/logs')
 export class LogsController {
   constructor(private readonly service: LogsService) {}

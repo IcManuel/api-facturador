@@ -12,9 +12,12 @@ import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { DocumentsService } from './documents.service';
 import { DocStatus, SriDocTypeCode, CompanyEnv } from '../../entities/enums';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Documentos')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/documents')
 export class DocumentsController {
   constructor(private readonly service: DocumentsService) {}

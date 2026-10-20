@@ -16,9 +16,12 @@ import { CollectionsReportCron } from './collections-report.cron';
 import { BillingStatus } from '../../entities/enums';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Facturación')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/billing')
 export class BillingController {
   constructor(

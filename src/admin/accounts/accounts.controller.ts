@@ -19,9 +19,12 @@ import { UpdateAccountDto } from './dto/update-account.dto';
 import { CreateAccountUserDto } from './dto/create-account-user.dto';
 import { UpdateAccountUserDto } from './dto/update-account-user.dto';
 import { ExtendTrialDto } from './dto/extend-trial.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Cuentas')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/accounts')
 export class AccountsController {
   constructor(private readonly service: AccountsService) {}

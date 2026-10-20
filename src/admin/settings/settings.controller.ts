@@ -8,9 +8,12 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
 import { UpdateSettingsDto } from './dto/update-setting.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Configuración')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/settings')
 export class SettingsController {
   constructor(private readonly service: SettingsService) {}

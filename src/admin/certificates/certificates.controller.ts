@@ -22,9 +22,12 @@ import {
 } from '@nestjs/swagger';
 import { CertificatesService } from './certificates.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Certificados')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/certificates')
 export class CertificatesController {
   constructor(private readonly service: CertificatesService) {}

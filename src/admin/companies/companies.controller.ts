@@ -38,6 +38,8 @@ import { CompanyStatus, SriDocTypeCode } from '../../entities/enums';
 import { SmtpService } from '../../client/smtp/smtp.service';
 import { UpsertSmtpDto } from '../../client/smtp/dto/upsert-smtp.dto';
 import { imageFileFilter, resolveImageMime } from '../../common/utils/image-upload.util';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 class SetDocTypesDto {
   @IsArray()
@@ -47,6 +49,7 @@ class SetDocTypesDto {
 
 @ApiTags('Admin - Empresas')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/companies')
 export class CompaniesController {
   constructor(

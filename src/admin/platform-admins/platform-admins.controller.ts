@@ -3,9 +3,12 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PlatformAdminsService } from './platform-admins.service';
 import { CreatePlatformAdminDto } from './dto/create-platform-admin.dto';
 import { UpdatePlatformAdminDto } from './dto/update-platform-admin.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Platform Admins')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/platform-admins')
 export class PlatformAdminsController {
   constructor(private readonly service: PlatformAdminsService) {}

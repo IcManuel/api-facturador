@@ -9,6 +9,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AccountStatusGuard } from '../common/guards/account-status.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { MailService } from '../common/services/mail.service';
 import { RefreshTokenService } from './refresh-token.service';
 import { PlatformAdmin } from '../entities/platform-admin.entity';
@@ -44,6 +45,8 @@ import { EstablishmentsModule } from '../establishments/establishments.module';
     JwtStrategy,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: AccountStatusGuard },
+    // Después de la sesión: exige platform_admin en todo admin/* (y respeta @Roles)
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
   exports: [AuthService],
 })

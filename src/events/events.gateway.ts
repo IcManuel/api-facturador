@@ -35,7 +35,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const secret = this.config.get<string>('JWT_SECRET')!;
-      const payload = jwt.verify(token, secret) as unknown as JwtPayload;
+      const payload = jwt.verify(token, secret, { algorithms: ['HS256'] }) as unknown as JwtPayload;
 
       // Join role-based rooms
       if (payload.role === 'platform_admin') {

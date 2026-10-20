@@ -1,9 +1,12 @@
 import { Controller, Get, Query, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { ErrorAnalyticsService } from './error-analytics.service';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { PLATFORM_ADMIN } from '../../common/guards/roles.guard';
 
 @ApiTags('Admin - Error Analytics')
 @ApiBearerAuth()
+@Roles(PLATFORM_ADMIN)
 @Controller('admin/error-analytics')
 export class ErrorAnalyticsController {
   constructor(private readonly service: ErrorAnalyticsService) {}
