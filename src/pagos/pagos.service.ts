@@ -9,6 +9,7 @@ import {
   IntentKind,
 } from '../entities/payment-intent.entity';
 import { Account } from '../entities/account.entity';
+import { Company } from '../entities/company.entity';
 import { AccountUser } from '../entities/account-user.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { AccountStatus, PlanTier } from '../entities/enums';
@@ -96,6 +97,8 @@ export class PagosService {
       order: { id: 'DESC' },
     });
 
+    const pagador = await this.pagadorSugerido(account);
+
     return {
       ok: true,
       bloqueo,
@@ -108,6 +111,36 @@ export class PagosService {
           ? await this.opcionesActivacion(account)
           : null,
       pagoEnCurso: enCurso ? { id: enCurso.id, estado: enCurso.status } : null,
+      pagador,
+    };
+  }
+
+  /**
+   * Datos para precargar el formulario de quien paga: los de la cuenta y, si faltan, los de
+   * su primera empresa activa. El cliente los puede cambiar (puede pagar otra persona).
+   */
+  private async pagadorSugerido(account: Account) {
+    const company = await this.dataSource.manager.findOne(Company, {
+      where: { accountId: account.id, isActive: true },
+      order: { id: 'ASC' },
+    });
+    const valida = (v?: string | null) => {
+      const d = soloDigitos(v ?? '');
+      if (d.length === 13) return validarRuc(d).valido ? d : null;
+      if (d.length === 10) {
+        const r = validarCedula(d);
+        return r.valido && !r.aviso ? d : null;
+      }
+      return null;
+    };
+    const celular = (v?: string | null) =>
+      normalizarCelular(v ?? '') ? (v ?? '').trim() : null;
+    return {
+      identificacion: valida(account.ruc) ?? valida(company?.ruc) ?? '',
+      telefono: celular(account.phone) ?? celular(company?.phone) ?? '',
+      direccion: (account.address || company?.address || '')
+        .trim()
+        .slice(0, 200),
     };
   }
 
