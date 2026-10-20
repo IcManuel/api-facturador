@@ -177,6 +177,13 @@ const addDays = (d, n) => { const r = new Date(d.getFullYear(), d.getMonth(), d.
     const pno = await q(`SELECT pno_payload FROM app.payment_notification WHERE pno_extras = $1 LIMIT 1`, [extras]);
     ok(pno.length && !JSON.stringify(pno[0].pno_payload).includes(CEDULA) && !JSON.stringify(pno[0].pno_payload).includes('John'), 'El aviso guardado no tiene cédula ni nombre del tarjetahabiente');
 
+    // Deuda menor al mínimo de Plux ($1,00): no se intenta el pago (el botón de Plux no abriría)
+    const M = await cuenta('M (deuda mínima)');
+    await periodo(M.id, 0.05, ymd(addDays(today, -1)));
+    s = await call('POST', '/client/billing/pago', M.jwt, pagador);
+    ok(s.body?.ok === false && s.body?.codigo === 'MONTO_MINIMO', 'Deuda de $0,05: no se intenta el pago (mínimo de Plux $1,00)', s.body);
+    ok((await call('GET', '/client/billing/pago/estado', M.jwt)).body?.montoMinimo === 1, 'El estado informa el mínimo al panel');
+
     // ── 3. Monto distinto y cuenta con la API cortada (X) ────────────────────
     console.log('\n── Monto alterado y API cortada');
     const x1 = await call('POST', '/client/billing/pago', X.jwt, pagador);

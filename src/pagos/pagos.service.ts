@@ -103,6 +103,7 @@ export class PagosService {
       ok: true,
       bloqueo,
       pagosEnLinea: this.config.habilitado && this.config.configurado,
+      montoMinimo: this.config.montoMinimoCentavos / 100,
       deuda: { total, periodos: deuda },
       fechas,
       trialEndsAt: account.trialEndsAt,
@@ -302,6 +303,14 @@ export class PagosService {
       periodIds = deuda.map((d) => d.id);
       amountCents = Math.round(deuda.reduce((s, d) => s + d.balance, 0) * 100);
       descripcion = `AutorizadorEC · Pago de ${deuda.length === 1 ? 'su período' : `${deuda.length} períodos`}`;
+    }
+
+    if (amountCents < c.montoMinimoCentavos) {
+      return {
+        ok: false,
+        codigo: 'MONTO_MINIMO',
+        msg: `El pago en línea acepta desde $${(c.montoMinimoCentavos / 100).toFixed(2)}. Su saldo de $${(amountCents / 100).toFixed(2)} se suma a su próximo cobro, o escríbanos para registrarlo.`,
+      };
     }
 
     await this.expirarPendientes(accountId);

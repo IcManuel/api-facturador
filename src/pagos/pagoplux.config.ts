@@ -42,6 +42,10 @@ export function leerConfigPlux(config: ConfigService) {
     scriptUrl: config.get<string>('PAGOPLUX_SCRIPT_URL') || amb.script,
     email: config.get<string>('PAGOPLUX_EMAIL') || amb.email,
     nombre: config.get<string>('PAGOPLUX_NOMBRE') || 'VEYZASOFT',
+    /** Monto mínimo que acepta el establecimiento (10078: $1,00). Con menos, el botón de Plux no abre. */
+    montoMinimoCentavos: Math.round(
+      Number(config.get<string>('PAGOPLUX_MONTO_MINIMO') || '1.00') * 100,
+    ),
     avisos,
     reenvioSecreto,
     clientId,
