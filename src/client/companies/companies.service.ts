@@ -29,6 +29,11 @@ import { CreateEstablishmentDto, UpdateEstablishmentDto } from '../../establishm
 
 const restrictedPlanTiers: PlanTier[] = [PlanTier.UNLIMITED, PlanTier.CUSTOM];
 
+/** Bajo Demanda anterior (sin cuota base), retirado con las reglas del 30-sep-2026. */
+const PLAN_BAJO_DEMANDA_ANTERIOR = 6;
+/** 30-sep-2026 00:00 en Ecuador. */
+const REGLAS_30_SEP_2026 = new Date('2026-09-30T05:00:00Z');
+
 @Injectable()
 export class ClientCompaniesService {
   constructor(
@@ -76,6 +81,16 @@ export class ClientCompaniesService {
     return company;
   }
 
+  /**
+   * Las cuentas registradas antes de las reglas del 30-sep-2026 conservan el Bajo Demanda
+   * anterior (sin cuota base), aunque todavía no lo tengan en ninguna empresa.
+   */
+  private async legacyPlanIdsByDate(accountId: number): Promise<number[]> {
+    const account = await this.accountRepo.findOne({ where: { id: accountId } });
+    if (!account || account.createdAt >= REGLAS_30_SEP_2026) return [];
+    return [PLAN_BAJO_DEMANDA_ANTERIOR];
+  }
+
   async getAvailablePlans(accountId?: number): Promise<SubscriptionPlan[]> {
     const active = await this.planRepo.find({
       where: {
@@ -95,9 +110,12 @@ export class ClientCompaniesService {
       .where('c.accountId = :accountId', { accountId })
       .getRawMany();
 
-    const missing = ownPlanIds
-      .map((r) => Number(r.planId))
-      .filter((id) => !active.some((p) => p.id === id));
+    const missing = [
+      ...new Set([
+        ...ownPlanIds.map((r) => Number(r.planId)),
+        ...(await this.legacyPlanIdsByDate(accountId)),
+      ]),
+    ].filter((id) => !active.some((p) => p.id === id));
 
     if (missing.length === 0) return active;
 
@@ -135,7 +153,7 @@ export class ClientCompaniesService {
       const grandfathered = await this.companyRepo.count({
         where: { accountId, planId: plan.id },
       });
-      if (!grandfathered) {
+      if (!grandfathered && !(await this.legacyPlanIdsByDate(accountId)).includes(plan.id)) {
         throw new BadRequestException('El plan seleccionado no está disponible');
       }
     }
