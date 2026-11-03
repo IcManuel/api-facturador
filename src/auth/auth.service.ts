@@ -16,6 +16,7 @@ import { MailService } from '../common/services/mail.service';
 import { NotificationService } from '../notifications/notification.service';
 import { RefreshTokenService } from './refresh-token.service';
 import { RegisterDto } from './dto/register.dto';
+import { TERMS_VERSION } from '../common/terms';
 import { EstablishmentsService } from '../establishments/establishments.service';
 
 @Injectable()
@@ -241,7 +242,7 @@ export class AuthService {
   }
 
   /**
-   * Public self-registration — creates account + admin user with 5-day trial.
+   * Public self-registration — creates account + admin user with a 15-day trial.
    */
   async register(dto: RegisterDto) {
     // Check RUC uniqueness
@@ -263,9 +264,11 @@ export class AuthService {
       ruc: dto.ruc,
       email: dto.email,
       phone: dto.phone || undefined,
-      type: AccountType.SINGLE,
+      type: dto.accountType === AccountType.MULTI ? AccountType.MULTI : AccountType.SINGLE,
       status: AccountStatus.TRIAL,
       trialEndsAt,
+      termsAcceptedAt: new Date(),
+      termsVersion: TERMS_VERSION,
       apiKey: 'ak_' + randomBytes(32).toString('hex'),
     });
     await this.accountRepo.save(account);
@@ -281,7 +284,8 @@ export class AuthService {
     });
     await this.accountUserRepo.save(user);
 
-    // Create the company for this single-account, with the requested plan
+    // Create the account's first company (in a multi account it is the integrator's own
+    // company; the rest are created via POST /client/companies), with the requested plan
     // (or basic as fallback) and a default emission point so the client can
     // configure (certificate, doc types, etc.) from their own panel right away.
     const plan = await this.resolveDefaultPlan(dto.planTier);
@@ -391,6 +395,7 @@ export class AuthService {
       accountEmail: account.email,
       adminName,
       trialEndsAt: trialEndsAt.toISOString().split('T')[0],
+      accountType: account.type,
     });
   }
 

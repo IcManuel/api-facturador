@@ -1,7 +1,8 @@
-import { Controller, Get, Patch, Body } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ClientProfileService } from './profile.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ConvertToMultiDto } from './dto/convert-to-multi.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Client - Profile')
@@ -23,5 +24,19 @@ export class ClientProfileController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.profileService.updateProfile(accountId, dto);
+  }
+
+  @Post('multiempresa')
+  @ApiOperation({
+    summary: 'Cambiar la cuenta a multiempresa',
+    description:
+      'Solo el administrador de la cuenta. Es de una sola vía: volver a empresa única lo hace soporte, y solo si la cuenta tiene una empresa.',
+  })
+  convertToMulti(
+    @CurrentUser('accountId') accountId: number,
+    @CurrentUser('id') userId: number,
+    @Body() _dto: ConvertToMultiDto,
+  ) {
+    return this.profileService.convertToMulti(accountId, userId);
   }
 }

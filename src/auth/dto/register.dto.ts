@@ -1,6 +1,6 @@
-import { IsString, IsEmail, IsOptional, Length, MinLength, IsEnum } from 'class-validator';
+import { IsString, IsEmail, IsOptional, Length, MinLength, IsEnum, Equals } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PlanTier } from '../../entities/enums';
+import { AccountType, PlanTier } from '../../entities/enums';
 
 export class RegisterDto {
   @ApiProperty({ description: 'Nombre de la empresa o cuenta', example: 'Mi Empresa S.A.' })
@@ -37,4 +37,20 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(PlanTier)
   planTier?: PlanTier;
+
+  @ApiPropertyOptional({
+    description:
+      'Tipo de cuenta: single (una empresa) o multi (varias empresas, p. ej. integradores o ERP que crean empresas por API con la llave ak_). Por defecto single.',
+    enum: AccountType,
+  })
+  @IsOptional()
+  @IsEnum(AccountType)
+  accountType?: AccountType;
+
+  @ApiProperty({
+    description: 'Debe ser true: acepta los términos y condiciones, incluidos los precios que se cobrarán por cada empresa.',
+    example: true,
+  })
+  @Equals(true, { message: 'Debe aceptar los términos y condiciones para crear la cuenta.' })
+  acceptTerms: boolean;
 }

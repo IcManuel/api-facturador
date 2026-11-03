@@ -79,6 +79,8 @@ export interface NewTrialRegistrationData {
   accountEmail: string;
   adminName: string;
   trialEndsAt: string; // YYYY-MM-DD
+  /** 'single' | 'multi' */
+  accountType: string;
 }
 
 export interface OverduePaymentData {
@@ -418,6 +420,10 @@ export class NotificationService {
           <td style="padding:8px 12px;border:1px solid #e9ecef">${data.adminName}</td>
         </tr>
         <tr>
+          <td style="padding:8px 12px;background:#f8f9fa;border:1px solid #e9ecef;font-weight:600">Tipo de cuenta</td>
+          <td style="padding:8px 12px;border:1px solid #e9ecef">${data.accountType === 'multi' ? '<strong>Multiempresa</strong> (integrador / ERP)' : 'Una empresa'}</td>
+        </tr>
+        <tr>
           <td style="padding:8px 12px;background:#eff6ff;border:1px solid #e9ecef;font-weight:600;color:#2563eb">Trial Expira</td>
           <td style="padding:8px 12px;background:#eff6ff;border:1px solid #e9ecef;font-weight:600;color:#2563eb">${data.trialEndsAt}</td>
         </tr>
@@ -429,7 +435,7 @@ export class NotificationService {
 
     await this.send(
       recipients,
-      `[NUEVO REGISTRO] ${data.accountName} (${data.accountRuc}) — Periodo de prueba 15 días`,
+      `[NUEVO REGISTRO${data.accountType === 'multi' ? ' MULTIEMPRESA' : ''}] ${data.accountName} (${data.accountRuc}) — Periodo de prueba 15 días`,
       html,
     );
   }

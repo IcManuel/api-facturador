@@ -70,6 +70,13 @@ export class Account {
   @Column({ name: 'acc_payment_lock', type: 'varchar', length: 10, nullable: true })
   paymentLock: string | null;
 
+  /** Cuándo aceptó los términos y condiciones al registrarse (NULL: cuentas anteriores al 022). */
+  @Column({ name: 'acc_terms_accepted_at', type: 'timestamptz', nullable: true })
+  termsAcceptedAt: Date | null;
+
+  @Column({ name: 'acc_terms_version', type: 'varchar', length: 20, nullable: true })
+  termsVersion: string | null;
+
   @Column({ name: 'acc_api_key', type: 'varchar', length: 100, unique: true, nullable: true })
   apiKey: string | null;
 

@@ -5,7 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { Account } from '../../entities/account.entity';
 import { AccountUser } from '../../entities/account-user.entity';
-import { AccountUserRole, AccountStatus } from '../../entities/enums';
+import { AccountUserRole, AccountStatus, AccountType } from '../../entities/enums';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { CreateAccountUserDto } from './dto/create-account-user.dto';
@@ -91,6 +91,17 @@ export class AccountsService {
 
   async update(id: number, dto: UpdateAccountDto): Promise<Account> {
     const account = await this.findOne(id);
+    // Multiempresa → empresa única solo con una empresa: con más, las otras quedarían fuera
+    // del panel (que en empresa única muestra una sola) aunque sigan emitiendo y cobrándose.
+    if (
+      dto.type === AccountType.SINGLE &&
+      account.type === AccountType.MULTI &&
+      (account.companies?.length ?? 0) > 1
+    ) {
+      throw new BadRequestException(
+        `La cuenta tiene ${account.companies.length} empresas. Para pasarla a empresa única debe quedar con una sola (mueva o elimine las demás).`,
+      );
+    }
     const previousWarning = account.warningMessage;
     const wasActive = account.isActive;
 
