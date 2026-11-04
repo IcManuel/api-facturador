@@ -26,6 +26,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
 
 import { CobroUsoService } from '../../cobro/cobro-uso.service';
 import { currentCycle, ymd } from '../../cobro/cobro.calendar';
+import { ymdEc } from '../../common/utils/date.util';
 
 @Injectable()
 export class ClientDashboardService {
@@ -394,7 +395,7 @@ export class ClientDashboardService {
 
       days.push({
         name: DAY_NAMES[dayStart.getDay()],
-        date: dayStart.toISOString().split('T')[0],
+        date: ymdEc(dayStart),
         docs: count,
       });
     }
@@ -430,7 +431,7 @@ export class ClientDashboardService {
 
       days.push({
         name: DAY_NAMES[dayStart.getDay()],
-        date: dayStart.toISOString().split('T')[0],
+        date: ymdEc(dayStart),
         docs: count,
       });
     }

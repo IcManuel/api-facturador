@@ -18,6 +18,7 @@ import { RefreshTokenService } from './refresh-token.service';
 import { RegisterDto } from './dto/register.dto';
 import { TERMS_VERSION } from '../common/terms';
 import { EstablishmentsService } from '../establishments/establishments.service';
+import { ymdEc } from '../common/utils/date.util';
 
 @Injectable()
 export class AuthService {
@@ -298,7 +299,7 @@ export class AuthService {
       phone: dto.phone || undefined,
       env: CompanyEnv.TEST,
       apiKey: 'sk_' + randomBytes(32).toString('hex'),
-      billingStartDate: new Date().toISOString().slice(0, 10),
+      billingStartDate: ymdEc(),
     });
     await this.companyRepo.save(company);
     const establishment = await this.establishmentsService.ensureExists(
@@ -394,7 +395,7 @@ export class AuthService {
       accountRuc: account.ruc,
       accountEmail: account.email,
       adminName,
-      trialEndsAt: trialEndsAt.toISOString().split('T')[0],
+      trialEndsAt: ymdEc(trialEndsAt),
       accountType: account.type,
     });
   }

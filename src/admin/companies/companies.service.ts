@@ -15,6 +15,7 @@ import { CreateEmissionPointDto } from './dto/create-emission-point.dto';
 import { UpdateEmissionPointDto } from './dto/update-emission-point.dto';
 import { SetSequentialDto } from './dto/set-sequential.dto';
 import { EstablishmentsService } from '../../establishments/establishments.service';
+import { ymdEc } from '../../common/utils/date.util';
 
 @Injectable()
 export class CompaniesService {
@@ -194,7 +195,7 @@ export class CompaniesService {
     const company = this.companyRepo.create({
       ...dto,
       apiKey,
-      billingStartDate: dto.billingStartDate ?? new Date().toISOString().slice(0, 10),
+      billingStartDate: dto.billingStartDate ?? ymdEc(),
     });
 
     return this.companyRepo.save(company);

@@ -44,3 +44,16 @@ export function formatDateTz(date: Date | string | null | undefined, timezone = 
 
   return `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}${offsetStr}`;
 }
+
+/** Zona horaria de la plataforma: todo se muestra y se agrupa en hora de Ecuador (GMT-5). */
+export const EC_TZ = 'America/Guayaquil';
+
+/** Fecha YYYY-MM-DD de un instante en hora de Ecuador (por defecto, hoy). */
+export function ymdEc(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: EC_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}

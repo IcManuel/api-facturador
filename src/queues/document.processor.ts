@@ -9,6 +9,7 @@ import { Document } from '../entities/document.entity';
 import { DocStatus } from '../entities/enums';
 import { DOCUMENT_QUEUE } from './queues.constants';
 import { WebhookDeliveryService } from './webhook-delivery.service';
+import { ymdEc } from '../common/utils/date.util';
 
 export interface ProcessDocumentJob {
   documentId: number;
@@ -153,11 +154,11 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
 
     // The SRI rejects documents whose emission date is not "today" — once the
     // date rolls over, auto-retry is pointless and a manual reissue is needed.
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = ymdEc();
     const issueStr =
       typeof doc.issueDate === 'string'
         ? (doc.issueDate as string).slice(0, 10)
-        : new Date(doc.issueDate).toISOString().slice(0, 10);
+        : ymdEc(new Date(doc.issueDate));
     if (issueStr !== todayStr) {
       this.logger.warn(
         `Document ${documentId}: issue date ${issueStr} is not today (${todayStr}) — no auto-retry, manual reissue required`,

@@ -7,6 +7,7 @@ import { Account } from '../../entities/account.entity';
 import { AccountUser } from '../../entities/account-user.entity';
 import { AccountUserRole, AccountStatus, AccountType } from '../../entities/enums';
 import { CreateAccountDto } from './dto/create-account.dto';
+import { ymdEc } from '../../common/utils/date.util';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { CreateAccountUserDto } from './dto/create-account-user.dto';
 import { UpdateAccountUserDto } from './dto/update-account-user.dto';
@@ -332,7 +333,7 @@ export class AccountsService {
       const cycleDay = Number(r.acc_billing_cycle_day) || 1;
       const isActive = r.acc_status === 'active';
       const nextBillingDate = isActive
-        ? (require('../billing/billing.service').BillingService.nextBillingDate as (d: Date, cd: number) => Date)(new Date(), cycleDay).toISOString().slice(0, 10)
+        ? ymdEc((require('../billing/billing.service').BillingService.nextBillingDate as (d: Date, cd: number) => Date)(new Date(), cycleDay))
         : null;
       return {
         accountId: Number(r.acc_id),

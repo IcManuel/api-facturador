@@ -26,6 +26,7 @@ import { SetSequentialDto } from '../../admin/companies/dto/set-sequential.dto';
 import { SriDocTypeCode } from '../../entities/enums';
 import { EstablishmentsService } from '../../establishments/establishments.service';
 import { CreateEstablishmentDto, UpdateEstablishmentDto } from '../../establishments/dto/establishment.dto';
+import { ymdEc } from '../../common/utils/date.util';
 
 const restrictedPlanTiers: PlanTier[] = [PlanTier.UNLIMITED, PlanTier.CUSTOM];
 
@@ -171,7 +172,7 @@ export class ClientCompaniesService {
       ...dto,
       accountId,
       apiKey,
-      billingStartDate: dto.billingStartDate ?? new Date().toISOString().slice(0, 10),
+      billingStartDate: dto.billingStartDate ?? ymdEc(),
     });
 
     const created = await this.companyRepo.save(company);

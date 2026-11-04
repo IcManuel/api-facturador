@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DocumentError } from '../../entities/document-error.entity';
 import { Document } from '../../entities/document.entity';
+import { ymdEc } from '../../common/utils/date.util';
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   '01': 'Factura',
@@ -274,7 +275,7 @@ export class ErrorAnalyticsService {
       (row: { date: any; client: string; system: string }) => ({
         date:
           row.date instanceof Date
-            ? row.date.toISOString().slice(0, 10)
+            ? ymdEc(row.date)
             : String(row.date).slice(0, 10),
         client: Number(row.client),
         system: Number(row.system),

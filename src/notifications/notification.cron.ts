@@ -8,6 +8,7 @@ import { Account } from '../entities/account.entity';
 import { BillingStatus, AccountStatus } from '../entities/enums';
 import { NotificationService } from './notification.service';
 import { RedisLockService } from '../common/services/redis-lock.service';
+import { ymdEc } from '../common/utils/date.util';
 
 @Injectable()
 export class NotificationCron {
@@ -70,7 +71,7 @@ export class NotificationCron {
           notificationEmail: company.notificationEmail,
           certSubject: cert.subjectCn,
           expiresAt: cert.expiresAt instanceof Date
-            ? cert.expiresAt.toISOString().slice(0, 10)
+            ? ymdEc(new Date(cert.expiresAt))
             : String(cert.expiresAt),
           daysLeft: Math.max(0, daysLeft),
           expired,
@@ -143,7 +144,7 @@ export class NotificationCron {
             year: bp.year,
             month: bp.month,
             balance,
-            blockDate: blockDate.toISOString().slice(0, 10),
+            blockDate: ymdEc(blockDate),
             graceDays: NotificationCron.GRACE_DAYS,
           });
           this.logger.log(`Aviso de bloqueo enviado a cuenta ${account.id} (${account.name}) — $${balance.toFixed(2)}`);

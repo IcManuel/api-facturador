@@ -11,6 +11,7 @@ import { DocumentStatusNotifier } from './document-status-notifier';
 import { EventsGateway } from '../../events/events.gateway';
 import { RedisLockService } from '../../common/services/redis-lock.service';
 import { NotificationService } from '../../notifications/notification.service';
+import { ymdEc } from '../../common/utils/date.util';
 
 /**
  * Cron job that cleans up documents stuck in non-terminal states.
@@ -102,14 +103,14 @@ export class StaleDocumentCron {
     if (stuck.length === 0) return;
     this.logger.warn(`Found ${stuck.length} documents with a lost system-retry job — rescuing`);
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = ymdEc();
 
     for (const doc of stuck) {
       const sysRetry = (doc.payload as any)?._systemRetry ?? {};
       const issueStr =
         typeof doc.issueDate === 'string'
           ? (doc.issueDate as string).slice(0, 10)
-          : new Date(doc.issueDate).toISOString().slice(0, 10);
+          : ymdEc(new Date(doc.issueDate));
 
       // Stale-dated documents can no longer be authorized — drop the marker.
       if (issueStr !== todayStr) {

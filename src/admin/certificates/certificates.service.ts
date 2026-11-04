@@ -9,6 +9,7 @@ import * as forge from 'node-forge';
 import { Certificate } from '../../entities/certificate.entity';
 import { CryptoService } from '../../common/services/crypto.service';
 import { PaginatedResult } from '../../common/dto/pagination.dto';
+import { ymdEc } from '../../common/utils/date.util';
 
 export interface P12ValidationResult {
   subjectCn: string;
@@ -123,7 +124,7 @@ export class CertificatesService {
 
     if (isExpired) {
       throw new BadRequestException(
-        `El certificado esta caducado desde el ${validTo.toISOString().slice(0, 10)}. Suba un certificado vigente.`,
+        `El certificado esta caducado desde el ${ymdEc(validTo)}. Suba un certificado vigente.`,
       );
     }
 

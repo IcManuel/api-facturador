@@ -8,6 +8,7 @@ import { BillingPeriod } from '../../entities/billing-period.entity';
 import { Certificate } from '../../entities/certificate.entity';
 import { SystemLog } from '../../entities/system-log.entity';
 import { DocStatus } from '../../entities/enums';
+import { ymdEc } from '../../common/utils/date.util';
 
 const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
@@ -270,7 +271,7 @@ export class DashboardService {
     for (const row of weeklyChartRaw) {
       const dateStr =
         row.day instanceof Date
-          ? row.day.toISOString().slice(0, 10)
+          ? ymdEc(row.day)
           : String(row.day).slice(0, 10);
       chartMap.set(dateStr, {
         authorized: Number(row.authorized) || 0,
@@ -287,7 +288,7 @@ export class DashboardService {
     for (let i = 0; i < 7; i++) {
       const d = new Date(sevenDaysAgo);
       d.setDate(d.getDate() + i);
-      const dateStr = d.toISOString().slice(0, 10);
+      const dateStr = ymdEc(d);
       const dayName = DAY_NAMES[d.getDay()];
       const counts = chartMap.get(dateStr) || { authorized: 0, rejected: 0 };
       weeklyChart.push({ name: dayName, date: dateStr, ...counts });
