@@ -227,7 +227,7 @@ export class XmlDocumentsService {
     const contentHash = dto.idempotencyKey ? null : this.computeContentHash(dto.xml);
     if (contentHash) {
       const duplicate = await this.docRepo.findOne({
-        where: { companyId: company.id, contentHash },
+        where: { companyId: company.id, env: company.env, contentHash },
       });
       if (duplicate) {
         throw new ConflictException({

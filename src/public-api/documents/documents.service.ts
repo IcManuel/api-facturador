@@ -492,7 +492,8 @@ export class PublicDocumentsService {
     const contentHash = dto.idempotencyKey ? null : this.computeContentHash(dto);
     if (contentHash) {
       const duplicate = await this.docRepo.findOne({
-        where: { companyId: company.id, contentHash },
+        // Por ambiente: el mismo comprobante enviado antes a pruebas no es un duplicado en producción
+        where: { companyId: company.id, env: company.env, contentHash },
       });
       if (duplicate) {
         throw new ConflictException({
@@ -527,8 +528,10 @@ export class PublicDocumentsService {
       fullSequential = `${establishment}-${emissionPoint}-${sequential}`;
 
       const sequentialTaken = await this.docRepo.findOne({
+        // Pruebas y producción tienen numeraciones separadas ante el SRI
         where: {
           companyId: company.id,
+          env: company.env,
           typeCode: docType,
           establishment,
           emissionPoint,
@@ -537,7 +540,7 @@ export class PublicDocumentsService {
       });
       if (sequentialTaken) {
         throw new ConflictException({
-          message: `El secuencial ${sequential} ya fue usado para este tipo de documento, establecimiento y punto de emisión.`,
+          message: `El secuencial ${sequential} ya fue usado para este tipo de documento, establecimiento y punto de emisión en el ambiente de ${company.env === 'production' ? 'producción' : 'pruebas'}.`,
           documentoExistente: {
             id: sequentialTaken.id,
             secuencial: sequentialTaken.sequential,
