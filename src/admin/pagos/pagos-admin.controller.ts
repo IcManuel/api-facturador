@@ -84,6 +84,14 @@ export class PagosAdminController {
     return this.service.intento(id);
   }
 
+  @Get('intentos/:id/facturacion')
+  @ApiOperation({
+    summary: 'Datos para emitir la factura de un pago aprobado',
+  })
+  facturacion(@Param('id', ParseIntPipe) id: number) {
+    return this.service.facturacion(id);
+  }
+
   @Get('avisos')
   @ApiOperation({
     summary:

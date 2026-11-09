@@ -1,6 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { MINUTOS_REPORTADO_SIN_CONFIRMAR } from '../../pagos/revision-pagos.cron';
+import {
+  armarDatosFactura,
+  ClienteFilaFactura,
+  PagoFilaFactura,
+} from './datos-factura';
 
 /** Lo que necesita revisar el administrador: pagos con problema y avisos sin resolver. */
 const AVISOS_A_REVISAR = ['SIN_PAGO', 'MONTO', 'ERROR', 'RECIBIDA'];
@@ -112,6 +121,76 @@ export class PagosAdminService {
         amount: a.amount === null ? null : Number(a.amount),
       })),
       pagos,
+    };
+  }
+
+  /** Lo necesario para emitir la factura de un pago aprobado. */
+  async facturacion(id: number) {
+    const [intento] = await this.dataSource.query<
+      Array<{
+        accountId: number;
+        kind: string;
+        status: string;
+        amount: string;
+        planName: string | null;
+        voucher: string | null;
+        providerTxId: string | null;
+        cardBrand: string | null;
+        cardLast4: string | null;
+        paidAt: string | null;
+      }>
+    >(
+      `SELECT i.acc_id AS "accountId", i.pin_kind AS kind, i.pin_status AS status,
+              i.pin_amount_cents / 100.0 AS amount, sp.spl_name AS "planName", i.pin_voucher AS voucher,
+              i.pin_provider_tx_id AS "providerTxId", i.pin_card_brand AS "cardBrand", i.pin_card_last4 AS "cardLast4",
+              to_char(i.pin_paid_at AT TIME ZONE 'America/Guayaquil', 'YYYY-MM-DD') AS "paidAt"
+       FROM app.payment_intent i
+       LEFT JOIN app.subscription_plan sp ON sp.spl_id = i.pin_plan_id
+       WHERE i.pin_id = $1`,
+      [id],
+    );
+    if (!intento) throw new NotFoundException('Pago no encontrado');
+    if (intento.status !== 'PAGADO') {
+      throw new BadRequestException(
+        'Solo se factura un pago aprobado por PagoPlux.',
+      );
+    }
+
+    const [cliente] = await this.dataSource.query<ClienteFilaFactura[]>(
+      `SELECT a.acc_name AS "accountName", a.acc_ruc AS "accountRuc", a.acc_email AS "accountEmail",
+              a.acc_phone AS "accountPhone", a.acc_address AS "accountAddress",
+              c.com_name AS "companyName", c.com_trade_name AS "companyTradeName", c.com_email AS "companyEmail",
+              c.com_phone AS "companyPhone", c.com_address AS "companyAddress"
+       FROM app.account a
+       LEFT JOIN LATERAL (
+         SELECT * FROM app.company c WHERE c.acc_id = a.acc_id AND c.com_ruc = a.acc_ruc ORDER BY c.com_id LIMIT 1
+       ) c ON true
+       WHERE a.acc_id = $1`,
+      [intento.accountId],
+    );
+    const pagos = await this.dataSource.query<PagoFilaFactura[]>(
+      `SELECT p.pay_amount::float AS amount,
+              to_char(bp.bpe_period_start_date, 'YYYY-MM-DD') AS "periodStart",
+              to_char(bp.bpe_period_end_date, 'YYYY-MM-DD') AS "periodEnd"
+       FROM app.payment p JOIN app.billing_period bp ON bp.bpe_id = p.bpe_id
+       WHERE p.pin_id = $1 ORDER BY bp.bpe_period_start_date, p.pay_id`,
+      [id],
+    );
+
+    return {
+      ...armarDatosFactura(
+        cliente,
+        pagos,
+        Number(intento.amount),
+        intento.kind === 'ACTIVACION' ? intento.planName : null,
+      ),
+      pago: {
+        fecha: intento.paidAt,
+        tarjetaMarca: intento.cardBrand,
+        tarjetaUltimos: intento.cardLast4,
+        comprobante: intento.voucher,
+        transaccion: intento.providerTxId,
+      },
     };
   }
 
