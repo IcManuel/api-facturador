@@ -8,6 +8,7 @@ import { AccountUser } from '../../entities/account-user.entity';
 import { AccountUserRole, AccountStatus, AccountType } from '../../entities/enums';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { ymdEc } from '../../common/utils/date.util';
+import { empresasConCopia } from '../../notifications/correos-cobro.util';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { CreateAccountUserDto } from './dto/create-account-user.dto';
 import { UpdateAccountUserDto } from './dto/update-account-user.dto';
@@ -120,9 +121,7 @@ export class AccountsService {
     const saved = await this.repo.save(account);
 
     // Load companies for notification recipients
-    const companyEmails = (account.companies ?? [])
-      .filter((c) => c.isActive)
-      .map((c) => ({ email: c.email, notificationEmail: c.notificationEmail }));
+    const companyEmails = empresasConCopia(account.type, account.companies);
 
     // Notification 5: Warning message created
     if (dto.warningMessage && dto.warningMessage !== previousWarning) {

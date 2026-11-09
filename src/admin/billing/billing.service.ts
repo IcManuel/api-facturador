@@ -13,6 +13,7 @@ import { recalcularBloqueo } from '../../cobro/cobro-bloqueo';
 import { Cobro } from '../../cobro/cobro.calculator';
 import { addDays, DIAS_VENCIMIENTO, fromYmd, previousCycleStart, ymd } from '../../cobro/cobro.calendar';
 import { PaymentMethod } from '../../entities/enums';
+import { empresasConCopia } from '../../notifications/correos-cobro.util';
 
 @Injectable()
 export class BillingService {
@@ -332,9 +333,7 @@ export class BillingService {
   private async sendBillingNotification(accountId: number, bp: BillingPeriod, cobro: Cobro, balance: number) {
     const account = await this.accountRepo.findOne({ where: { id: accountId }, relations: ['companies'] });
     if (!account) return;
-    const companyEmails = (account.companies ?? [])
-      .filter((c) => c.isActive)
-      .map((c) => ({ email: c.email, notificationEmail: c.notificationEmail }));
+    const companyEmails = empresasConCopia(account.type, account.companies);
 
     await this.notificationService.sendBillingInvoice({
       accountName: account.name,
@@ -575,9 +574,7 @@ export class BillingService {
       if (!account) continue;
 
       const total = Math.round(periods.reduce((s, p) => s + p.balance, 0) * 100) / 100;
-      const companyEmails = (account.companies ?? [])
-        .filter((c) => c.isActive)
-        .map((c) => ({ email: c.email, notificationEmail: c.notificationEmail }));
+      const companyEmails = empresasConCopia(account.type, account.companies);
 
       await this.notificationService.sendPaymentReminder({
         accountName: account.name,

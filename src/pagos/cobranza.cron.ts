@@ -9,6 +9,7 @@ import { AccountStatus } from '../entities/enums';
 import { deudaAbierta, etapaDeCuenta } from '../cobro/cobro-bloqueo';
 import { daysBetween, fromYmd } from '../cobro/cobro.calendar';
 import { errMsg } from './pagos.util';
+import { empresasConCopia } from '../notifications/correos-cobro.util';
 
 /**
  * Cobranza automática, todos los días a las 09:00 (hora de Ecuador). Calendario contado desde
@@ -81,10 +82,7 @@ export class CobranzaCron {
           .sendCobroVencido({
             accountName: account.name,
             accountEmail: account.email,
-            companyEmails: companies.map((c) => ({
-              email: c.email,
-              notificationEmail: c.notificationEmail,
-            })),
+            companyEmails: empresasConCopia(account.type, companies),
             balance: saldo,
             bloqueoPanel: fechas.bloqueoPanel,
             corteApi: fechas.corteApi,

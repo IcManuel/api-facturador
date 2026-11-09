@@ -16,6 +16,7 @@ import { recalcularBloqueo } from '../cobro/cobro-bloqueo';
 import { addDays, currentCycle, ymd } from '../cobro/cobro.calendar';
 import { desgloseIva } from '../cobro/cobro.calculator';
 import { errMsg } from './pagos.util';
+import { empresasConCopia } from '../notifications/correos-cobro.util';
 
 /** Un cobro que Plux confirmó (por su aviso). */
 export interface CobroConfirmado {
@@ -147,10 +148,7 @@ export class CobrosService {
           this.notifications.sendPaymentReceived({
             accountName: account.name,
             accountEmail: account.email,
-            companyEmails: companies.map((c) => ({
-              email: c.email,
-              notificationEmail: c.notificationEmail,
-            })),
+            companyEmails: empresasConCopia(account.type, companies),
             amount: intent.amountCents / 100,
             concepto: activada
               ? 'Activación de la cuenta (primer mes)'

@@ -9,6 +9,7 @@ import { BillingStatus, AccountStatus } from '../entities/enums';
 import { NotificationService } from './notification.service';
 import { RedisLockService } from '../common/services/redis-lock.service';
 import { ymdEc } from '../common/utils/date.util';
+import { empresasConCopia } from './correos-cobro.util';
 
 @Injectable()
 export class NotificationCron {
@@ -132,9 +133,7 @@ export class NotificationCron {
         const blockDate = new Date(dueDate);
         blockDate.setDate(blockDate.getDate() + 1 + NotificationCron.GRACE_DAYS);
 
-        const companyEmails = (account.companies ?? [])
-          .filter((c) => c.isActive)
-          .map((c) => ({ email: c.email, notificationEmail: c.notificationEmail }));
+        const companyEmails = empresasConCopia(account.type, account.companies);
 
         if (daysLate === 1) {
           await this.notificationService.sendBlockWarning({
