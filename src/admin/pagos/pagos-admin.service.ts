@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { MINUTOS_REPORTADO_SIN_CONFIRMAR } from '../../pagos/revision-pagos.cron';
 import {
@@ -10,13 +11,26 @@ import {
   ClienteFilaFactura,
   PagoFilaFactura,
 } from './datos-factura';
+import {
+  calcularNeto,
+  leerTarifaPlux,
+  sumarNetos,
+  TarifaPlux,
+} from './neto-pago';
 
 /** Lo que necesita revisar el administrador: pagos con problema y avisos sin resolver. */
 const AVISOS_A_REVISAR = ['SIN_PAGO', 'MONTO', 'ERROR', 'RECIBIDA'];
 
 @Injectable()
 export class PagosAdminService {
-  constructor(private readonly dataSource: DataSource) {}
+  private readonly tarifa: TarifaPlux;
+
+  constructor(
+    private readonly dataSource: DataSource,
+    config: ConfigService,
+  ) {
+    this.tarifa = leerTarifaPlux(config);
+  }
 
   async resumen() {
     const [r] = await this.dataSource.query<
@@ -42,8 +56,21 @@ export class PagosAdminService {
             WHERE pin_status = 'PAGADO' AND pin_paid_at >= date_trunc('day', now() AT TIME ZONE 'America/Guayaquil') AT TIME ZONE 'America/Guayaquil') AS "pagadosHoy"`,
       [MINUTOS_REPORTADO_SIN_CONFIRMAR, AVISOS_A_REVISAR],
     );
+    const delMes = await this.dataSource.query<
+      Array<{ cents: number }>
+    >(
+      `SELECT pin_amount_cents AS cents FROM app.payment_intent
+       WHERE pin_status = 'PAGADO'
+         AND pin_paid_at >= date_trunc('month', now() AT TIME ZONE 'America/Guayaquil') AT TIME ZONE 'America/Guayaquil'`,
+    );
+    const netoMes = sumarNetos(
+      delMes.map((d) => d.cents),
+      this.tarifa,
+    );
     return {
       ...r,
+      ganasMes: netoMes.ganas,
+      depositoMes: netoMes.deposito,
       montoMes: Number(r.montoMes ?? 0),
       minutosSinConfirmar: MINUTOS_REPORTADO_SIN_CONFIRMAR,
     };
@@ -90,7 +117,14 @@ export class PagosAdminService {
       params,
     );
     return {
-      data: data.map((d) => ({ ...d, amount: Number(d.amount) })),
+      data: data.map((d) => ({
+        ...d,
+        amount: Number(d.amount),
+        neto:
+          d.status === 'PAGADO'
+            ? calcularNeto(Math.round(Number(d.amount) * 100), this.tarifa)
+            : null,
+      })),
       total,
       page: f.page,
       limit: f.limit,
@@ -183,6 +217,10 @@ export class PagosAdminService {
         pagos,
         Number(intento.amount),
         intento.kind === 'ACTIVACION' ? intento.planName : null,
+      ),
+      neto: calcularNeto(
+        Math.round(Number(intento.amount) * 100),
+        this.tarifa,
       ),
       pago: {
         fecha: intento.paidAt,
