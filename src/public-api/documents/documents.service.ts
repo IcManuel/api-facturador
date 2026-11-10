@@ -25,6 +25,7 @@ import { DOCUMENT_QUEUE } from '../../queues/queues.constants';
 import { formatDateTz } from '../../common/utils/date.util';
 import { NotificationService } from '../../notifications/notification.service';
 import { EstablishmentsService } from '../../establishments/establishments.service';
+import { conflictoPorDuplicado } from './documento-duplicado.util';
 
 /** States where a document can be corrected and reprocessed */
 const CORRECTABLE_STATES: DocStatus[] = [DocStatus.CREATED, DocStatus.REJECTED, DocStatus.FAILED];
@@ -275,9 +276,9 @@ export class PublicDocumentsService {
    * Find a document by the idempotency key it was emitted with.
    * Returns the same shape as findOne() (estado, clave, errores, etc.).
    */
-  async findByIdempotencyKey(companyId: number, key: string) {
+  async findByIdempotencyKey(company: Company, key: string) {
     const doc = await this.docRepo.findOne({
-      where: { idempotencyKey: key, companyId },
+      where: { idempotencyKey: key, companyId: company.id, env: company.env },
       relations: ['company', 'timeline', 'errors', 'files'],
     });
     if (!doc) {
@@ -465,7 +466,7 @@ export class PublicDocumentsService {
 
     if (dto.idempotencyKey) {
       const existing = await this.docRepo.findOne({
-        where: { idempotencyKey: dto.idempotencyKey, companyId: company.id },
+        where: { idempotencyKey: dto.idempotencyKey, companyId: company.id, env: company.env },
       });
       if (existing) {
         throw new ConflictException({
@@ -636,7 +637,12 @@ export class PublicDocumentsService {
     doc.idempotencyKey = dto.idempotencyKey as any;
     doc.payload = dto as any;
 
-    const saved = await this.docRepo.save(doc);
+    let saved: Document;
+    try {
+      saved = await this.docRepo.save(doc);
+    } catch (err) {
+      throw (await conflictoPorDuplicado(err, this.docRepo, doc)) ?? err;
+    }
 
     await this.timelineRepo.save({
       documentId: saved.id,

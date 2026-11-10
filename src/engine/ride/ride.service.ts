@@ -23,6 +23,13 @@ const IVA_RATE_LABELS: Record<string, string> = {
   '8': 'Diferenciado',
 };
 
+/** Precio unitario del RIDE: 2 decimales, o hasta 6 si los tiene (1.5 → 1.50; 1.234567 tal cual). */
+export function precioParaRide(valor: number): string {
+  const seis = valor.toFixed(6).replace(/0+$/, '');
+  const decimales = seis.split('.')[1]?.length ?? 0;
+  return decimales <= 2 ? valor.toFixed(2) : seis;
+}
+
 const DOC_TYPE_LABELS: Record<string, string> = {
   '01': 'FACTURA',
   '03': 'LIQUIDACION DE COMPRAS',
@@ -597,8 +604,11 @@ export class RideService {
     // ── Data rows ──
     doc.font(FONT_NORMAL).fontSize(7);
     for (const det of data.detalles) {
-      const ivaLabel = det.impuestos[0]
-        ? (IVA_RATE_LABELS[det.impuestos[0].codigoPorcentaje] || `${det.impuestos[0].tarifa}%`)
+      // Con ICE la línea lleva dos impuestos: la columna es la del IVA, venga en el orden que venga
+      const impuestoIva =
+        det.impuestos.find((i) => i.codigoPorcentaje in IVA_RATE_LABELS) ?? det.impuestos[0];
+      const ivaLabel = impuestoIva
+        ? (IVA_RATE_LABELS[impuestoIva.codigoPorcentaje] || `${impuestoIva.tarifa}%`)
         : '0%';
       const descPct = det.precioUnitario > 0
         ? ((det.descuento / (det.precioUnitario * det.cantidad)) * 100).toFixed(2) + '%'
@@ -628,7 +638,7 @@ export class RideService {
         det.descripcion,
         ivaLabel,
         'UNI',
-        det.precioUnitario.toFixed(2),
+        precioParaRide(det.precioUnitario),
         descPct,
         det.precioTotalSinImpuesto.toFixed(2),
       ];

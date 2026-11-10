@@ -17,6 +17,7 @@ import { EmissionPoint } from '../../entities/emission-point.entity';
 import { CompanyDocType } from '../../entities/company-doc-type.entity';
 import { DocStatus, SriDocTypeCode, TimelineStepStatus } from '../../entities/enums';
 import { DocumentProcessingService, ProcessingResult } from '../../engine/processing/document-processing.service';
+import { conflictoPorDuplicado } from './documento-duplicado.util';
 import { XmlParserService, ParsedXmlMetadata } from '../../engine/xml/xml-parser.service';
 import { CreateXmlDocumentDto } from './dto/create-xml-document.dto';
 import { DOCUMENT_QUEUE } from '../../queues/queues.constants';
@@ -201,7 +202,7 @@ export class XmlDocumentsService {
 
     if (dto.idempotencyKey) {
       const existing = await this.docRepo.findOne({
-        where: { idempotencyKey: dto.idempotencyKey, companyId: company.id },
+        where: { idempotencyKey: dto.idempotencyKey, companyId: company.id, env: company.env },
       });
       if (existing) {
         throw new ConflictException({
@@ -267,7 +268,12 @@ export class XmlDocumentsService {
     // Store raw XML and email in payload for processing
     doc.payload = { _rawXml: dto.xml, emailComprador: dto.emailComprador } as any;
 
-    const saved = await this.docRepo.save(doc);
+    let saved: Document;
+    try {
+      saved = await this.docRepo.save(doc);
+    } catch (err) {
+      throw (await conflictoPorDuplicado(err, this.docRepo, doc)) ?? err;
+    }
 
     await this.timelineRepo.save({
       documentId: saved.id,

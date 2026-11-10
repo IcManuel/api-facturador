@@ -44,8 +44,17 @@ describe('NotaCreditoGenerator', () => {
   it('should generate valid notaCredito XML', () => {
     const xml = gen.generate(baseData);
     expect(xml).toContain('<notaCredito');
-    expect(xml).toContain('version="1.0.0"');
+    expect(xml).toContain('version="1.1.0"');
     expect(xml).toContain('<codDoc>04</codDoc>');
+  });
+
+  it('conserva los 6 decimales de cantidad y precioUnitario', () => {
+    const xml = gen.generate({
+      ...baseData,
+      detalles: [{ ...baseData.detalles[0], cantidad: 2.5, precioUnitario: 1.234567 }],
+    });
+    expect(xml).toContain('<cantidad>2.500000</cantidad>');
+    expect(xml).toContain('<precioUnitario>1.234567</precioUnitario>');
   });
 
   it('should start with XML declaration', () => {

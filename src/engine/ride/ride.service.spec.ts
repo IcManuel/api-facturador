@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { inflateSync, deflateSync } from 'zlib';
-import { RideService, RideData } from './ride.service';
+import { RideService, RideData, precioParaRide } from './ride.service';
 
 /**
  * Pruebas del encabezado del RIDE.
@@ -638,5 +638,18 @@ describe('RIDE — encabezado del emisor', () => {
         expect(all).toContain(LARGO.replace(/\s+/g, ''));
       });
     }
+  });
+});
+
+describe('precioParaRide', () => {
+  it('deja 2 decimales cuando alcanzan', () => {
+    expect(precioParaRide(1.5)).toBe('1.50');
+    expect(precioParaRide(3)).toBe('3.00');
+    expect(precioParaRide(0)).toBe('0.00');
+  });
+
+  it('muestra hasta 6 decimales cuando los tiene', () => {
+    expect(precioParaRide(1.234567)).toBe('1.234567');
+    expect(precioParaRide(3.435)).toBe('3.435');
   });
 });

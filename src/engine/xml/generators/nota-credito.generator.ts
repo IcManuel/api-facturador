@@ -2,14 +2,15 @@ import { create } from 'xmlbuilder2';
 
 /**
  * Generates SRI-compliant XML for Nota de Crédito (tipo 04).
- * Based on: Ficha Técnica del Comprobante Electrónico - Nota de Crédito v1.0.0
+ * Based on: Ficha Técnica del Comprobante Electrónico - Nota de Crédito v1.1.0
+ * (Anexo 3: cantidad y precioUnitario con hasta 6 decimales; la 1.0.0 solo admite 2).
  */
 export class NotaCreditoGenerator {
   generate(data: NotaCreditoData): string {
     const root = create({ version: '1.0', encoding: 'UTF-8' })
       .ele('notaCredito', {
         id: 'comprobante',
-        version: '1.0.0',
+        version: '1.1.0',
       });
 
     this.buildInfoTributaria(root, data);
