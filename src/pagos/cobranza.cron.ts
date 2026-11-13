@@ -16,7 +16,8 @@ import { empresasConCopia } from '../notifications/correos-cobro.util';
  * el cierre del ciclo (cobro.calendar):
  *   cierre + 5  → correo «su pago venció hoy» (el último correo de cobro)
  *   cierre + 10 → panel bloqueado: solo puede pagar; la API sigue emitiendo. Sin correo.
- *   cierre + 20 → cuenta bloqueada (se corta la emisión por API). Sin correo.
+ *   cierre + 10 → cuenta bloqueada (se corta la emisión por API). Sin correo.
+ *   (cuentas con términos anteriores a 2026-11-13: cierre + 20 hasta el 15-dic-2026)
  * Al confirmarse el pago, la cuenta se desbloquea sola (cobro-bloqueo.recalcularBloqueo).
  */
 @Injectable()
@@ -64,7 +65,11 @@ export class CobranzaCron {
       const account = await m.findOne(Account, { where: { id: acc_id } });
       if (!account) continue;
       const deuda = await deudaAbierta(m, acc_id);
-      const { etapa, fechas } = etapaDeCuenta(deuda, today);
+      const { etapa, fechas } = etapaDeCuenta(
+        deuda,
+        today,
+        account.termsVersion,
+      );
       if (!fechas) continue;
       const saldo =
         Math.round(deuda.reduce((s, d) => s + d.balance, 0) * 100) / 100;

@@ -78,7 +78,11 @@ export class PagosService {
     });
     if (!account) return { ok: false, msg: 'Cuenta no encontrada' };
     const deuda = await deudaAbierta(this.dataSource.manager, accountId);
-    const { etapa, fechas } = etapaDeCuenta(deuda);
+    const { etapa, fechas } = etapaDeCuenta(
+      deuda,
+      new Date(),
+      account.termsVersion,
+    );
     const total =
       Math.round(deuda.reduce((s, d) => s + d.balance, 0) * 100) / 100;
     const demoVencida = this.esDemoPorActivar(account);

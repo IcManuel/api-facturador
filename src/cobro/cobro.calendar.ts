@@ -2,13 +2,32 @@
  * Calendario de cobro (Manuel, 19-oct-2026), contado desde el día de cierre del ciclo:
  *   cierre      → se cierra el período y llega el correo con «Pagar ahora»
  *   cierre + 5  → vence; aviso en el panel que se puede cerrar
- *   cierre + 10 → panel bloqueado: solo puede pagar (la API sigue emitiendo)
- *   cierre + 20 → cuenta bloqueada: se corta la emisión por API
+ *   cierre + 10 → panel bloqueado y se corta la emisión por API (Manuel, 13-nov-2026)
  * Desde que el panel se bloquea no se envían más correos de cobro.
+ *
+ * Antes el corte de la API era a cierre + 20. Las cuentas que aceptaron términos
+ * anteriores a 2026-11-13 conservan los 20 días hasta CORTE_10_DIAS_PARA_TODAS
+ * (30 días de aviso, como prometen los términos).
  */
 export const DIAS_VENCIMIENTO = 5;
 export const DIAS_BLOQUEO_PANEL = 10;
-export const DIAS_CORTE_API = 20;
+export const DIAS_CORTE_API = 10;
+export const DIAS_CORTE_API_ANTERIOR = 20;
+/** Versión de términos desde la que rige el corte a los 10 días. */
+export const TERMINOS_CORTE_10_DIAS = '2026-11-13';
+/** Desde este día el corte a los 10 días rige para todas las cuentas. */
+export const CORTE_10_DIAS_PARA_TODAS = '2026-12-15';
+
+/** Días desde el cierre hasta el corte de la API para una cuenta. */
+export function diasCorteApi(
+  termsVersion: string | null | undefined,
+  today: Date,
+): number {
+  if (termsVersion && termsVersion >= TERMINOS_CORTE_10_DIAS)
+    return DIAS_CORTE_API;
+  if (ymd(today) >= CORTE_10_DIAS_PARA_TODAS) return DIAS_CORTE_API;
+  return DIAS_CORTE_API_ANTERIOR;
+}
 
 /** Fecha local (hora del servidor, Ecuador) en formato YYYY-MM-DD. */
 export function ymd(d: Date): string {
@@ -74,12 +93,16 @@ export type EtapaCobro =
   | 'panel_bloqueado'
   | 'api_cortada';
 
-export function etapaCobro(dueDate: Date | string, today: Date): EtapaCobro {
+export function etapaCobro(
+  dueDate: Date | string,
+  today: Date,
+  diasCorte = DIAS_CORTE_API,
+): EtapaCobro {
   const due =
     typeof dueDate === 'string' ? fromYmd(dueDate) : startOfDay(dueDate);
   const late = daysBetween(due, today); // 0 = vence hoy
   const panel = DIAS_BLOQUEO_PANEL - DIAS_VENCIMIENTO;
-  const api = DIAS_CORTE_API - DIAS_VENCIMIENTO;
+  const api = diasCorte - DIAS_VENCIMIENTO;
   if (late >= api) return 'api_cortada';
   if (late >= panel) return 'panel_bloqueado';
   if (late >= 0) return 'vencido';
@@ -87,11 +110,11 @@ export function etapaCobro(dueDate: Date | string, today: Date): EtapaCobro {
 }
 
 /** Fechas clave de una deuda a partir de su vencimiento. */
-export function fechasCobro(dueDate: string) {
+export function fechasCobro(dueDate: string, diasCorte = DIAS_CORTE_API) {
   const due = fromYmd(dueDate);
   return {
     vence: ymd(due),
     bloqueoPanel: ymd(addDays(due, DIAS_BLOQUEO_PANEL - DIAS_VENCIMIENTO)),
-    corteApi: ymd(addDays(due, DIAS_CORTE_API - DIAS_VENCIMIENTO)),
+    corteApi: ymd(addDays(due, diasCorte - DIAS_VENCIMIENTO)),
   };
 }

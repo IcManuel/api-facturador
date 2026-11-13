@@ -534,8 +534,13 @@ export class NotificationService {
         <strong>$${data.balance.toFixed(2)}</strong> (IVA incluido).
       </p>
       <p style="color:#555;font-size:13px">
-        Si no se registra el pago, el <strong>${fecha(data.bloqueoPanel)}</strong> el panel se bloqueará y solo
-        permitirá pagar, y el <strong>${fecha(data.corteApi)}</strong> se suspenderá la emisión de comprobantes.
+        ${
+          data.bloqueoPanel === data.corteApi
+            ? `Si no se registra el pago, el <strong>${fecha(data.corteApi)}</strong> se suspenderá la emisión de
+        comprobantes y el panel solo permitirá pagar.`
+            : `Si no se registra el pago, el <strong>${fecha(data.bloqueoPanel)}</strong> el panel se bloqueará y solo
+        permitirá pagar, y el <strong>${fecha(data.corteApi)}</strong> se suspenderá la emisión de comprobantes.`
+        }
       </p>
       <div style="text-align:center;margin:24px 0">
         <a href="${this.panelUrl('/client/billing?pagar=1')}" style="display:inline-block;padding:12px 32px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px">Pagar ahora</a>

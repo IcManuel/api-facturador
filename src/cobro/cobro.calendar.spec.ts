@@ -1,5 +1,6 @@
 import {
   currentCycle,
+  diasCorteApi,
   etapaCobro,
   fechasCobro,
   previousCycleStart,
@@ -36,10 +37,10 @@ describe('calendario de cobro', () => {
     expect([ymd(c.start), ymd(c.end)]).toEqual(['2026-12-19', '2027-01-19']);
   });
 
-  it('etapas: cierre+5 vence, +10 panel, +20 API', () => {
+  it('etapas anteriores: cierre+5 vence, +10 panel, +20 API', () => {
     const cierre = d('2026-11-06');
     const due = addDays(cierre, 5);
-    const at = (n: number) => etapaCobro(due, addDays(cierre, n));
+    const at = (n: number) => etapaCobro(due, addDays(cierre, n), 20);
     expect([
       at(0),
       at(4),
@@ -62,10 +63,36 @@ describe('calendario de cobro', () => {
   });
 
   it('fechas clave para mostrar al cliente', () => {
-    expect(fechasCobro('2026-11-11')).toEqual({
+    expect(fechasCobro('2026-11-11', 20)).toEqual({
       vence: '2026-11-11',
       bloqueoPanel: '2026-11-16',
       corteApi: '2026-11-26',
     });
+    expect(fechasCobro('2026-11-11')).toEqual({
+      vence: '2026-11-11',
+      bloqueoPanel: '2026-11-16',
+      corteApi: '2026-11-16',
+    });
+  });
+
+  it('etapas nuevas: cierre+5 vence, +10 se corta la API', () => {
+    const cierre = d('2026-11-06');
+    const due = addDays(cierre, 5);
+    const at = (n: number) => etapaCobro(due, addDays(cierre, n));
+    expect([at(4), at(5), at(9), at(10), at(30)]).toEqual([
+      'al_dia',
+      'vencido',
+      'vencido',
+      'api_cortada',
+      'api_cortada',
+    ]);
+  });
+
+  it('corte a 10 días: términos nuevos ya, anteriores desde el 15-dic', () => {
+    expect(diasCorteApi('2026-11-13', d('2026-11-14'))).toBe(10);
+    expect(diasCorteApi('2026-11-03', d('2026-11-14'))).toBe(20);
+    expect(diasCorteApi(null, d('2026-12-14'))).toBe(20);
+    expect(diasCorteApi(null, d('2026-12-15'))).toBe(10);
+    expect(diasCorteApi('2026-11-03', d('2027-01-01'))).toBe(10);
   });
 });

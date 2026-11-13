@@ -1,7 +1,12 @@
 import { EntityManager } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { AccountStatus } from '../entities/enums';
-import { etapaCobro, EtapaCobro, fechasCobro } from './cobro.calendar';
+import {
+  diasCorteApi,
+  etapaCobro,
+  EtapaCobro,
+  fechasCobro,
+} from './cobro.calendar';
 
 export interface DeudaPeriodo {
   id: number;
@@ -64,11 +69,13 @@ export async function deudaAbierta(
 export function etapaDeCuenta(
   deuda: DeudaPeriodo[],
   today = new Date(),
+  termsVersion?: string | null,
 ): { etapa: EtapaCobro; fechas: ReturnType<typeof fechasCobro> | null } {
   if (!deuda.length) return { etapa: 'al_dia', fechas: null };
+  const dias = diasCorteApi(termsVersion, today);
   return {
-    etapa: etapaCobro(deuda[0].dueDate, today),
-    fechas: fechasCobro(deuda[0].dueDate),
+    etapa: etapaCobro(deuda[0].dueDate, today, dias),
+    fechas: fechasCobro(deuda[0].dueDate, dias),
   };
 }
 
@@ -89,6 +96,7 @@ export async function recalcularBloqueo(
   const { etapa } = etapaDeCuenta(
     await deudaAbierta(manager, accountId),
     today,
+    account.termsVersion,
   );
 
   let desbloqueada = false;
